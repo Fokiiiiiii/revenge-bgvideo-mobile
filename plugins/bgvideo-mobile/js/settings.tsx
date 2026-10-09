@@ -1,7 +1,7 @@
 import Page from '@revenge-mod/components/Page'
 import { Design } from '@revenge-mod/discord/design'
 import { FileModule } from '@revenge-mod/discord/native'
-import { useState } from 'react'
+import { Component, useState } from 'react'
 import {
 	AppState,
 	Image,
@@ -14,7 +14,7 @@ import {
 import { useTranslator } from './localization'
 import { isSupportedMediaUri, isVideoUri, normalizeSettings } from './logic'
 import type { PluginSettingsComponent } from '@revenge-mod/plugins/types'
-import type { ComponentProps, ComponentType } from 'react'
+import type { ComponentProps, ComponentType, ReactNode } from 'react'
 import type { Settings } from './logic'
 
 type Props = ComponentProps<PluginSettingsComponent<{ jsonStorage: Settings }>>
@@ -22,6 +22,27 @@ type VideoProps = Record<string, unknown>
 
 const { Stack, TableRowGroup, TableSwitchRow, TextInput } = Design
 let VideoComponent: ComponentType<VideoProps> | undefined
+
+export class VideoErrorBoundary extends Component<
+	{ children?: ReactNode; fallback?: ReactNode },
+	{ hasError: boolean }
+> {
+	state = { hasError: false }
+
+	static getDerivedStateFromError() {
+		return { hasError: true }
+	}
+
+	componentDidCatch(error: Error) {
+		console.warn('[BgVideo] video render failed:', error.message)
+	}
+
+	render() {
+		return this.state.hasError
+			? (this.props.fallback ?? null)
+			: (this.props.children ?? null)
+	}
+}
 
 export function setPreviewVideoComponent(
 	component: ComponentType<VideoProps> | undefined,
@@ -42,7 +63,7 @@ function Preview({ settings }: { settings: Settings }) {
 	if (!uri)
 		return (
 			<View style={styles.preview}>
-				<Text>
+				<Text style={styles.previewText}>
 					{t(
 						'previewPasteSource',
 						'Paste an image or video source to preview it.',
@@ -53,7 +74,7 @@ function Preview({ settings }: { settings: Settings }) {
 	if (!isSupportedMediaUri(uri))
 		return (
 			<View style={styles.preview}>
-				<Text>
+				<Text style={styles.previewText}>
 					{t(
 						'previewUnsupportedSource',
 						'Use an HTTP(S), file://, or content:// URI. YouTube is not supported.',
@@ -81,7 +102,7 @@ function Preview({ settings }: { settings: Settings }) {
 					style={mediaStyle}
 				/>
 			) : video ? (
-				<Text>
+				<Text style={styles.previewText}>
 					{t(
 						'previewPlayerUnavailable',
 						'Video preview is unavailable until the app player module loads.',
@@ -113,6 +134,9 @@ const styles = StyleSheet.create({
 		padding: 12,
 		position: 'relative',
 	},
+	previewText: {
+		color: '#f2f3f5',
+	},
 })
 
 export default function SettingsComponent({ api }: Props) {
@@ -132,7 +156,17 @@ export default function SettingsComponent({ api }: Props) {
 		<Page>
 			<ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
 				<Stack spacing={16}>
-					<Preview settings={settings} />
+					<VideoErrorBoundary
+						fallback={
+							<View style={styles.preview}>
+								<Text style={styles.previewText}>
+									動画プレビューを表示できません。URLを確認してください。
+								</Text>
+							</View>
+						}
+					>
+						<Preview settings={settings} />
+					</VideoErrorBoundary>
 					<TableRowGroup title={t('backgroundMedia', 'Background media')}>
 						<TableSwitchRow
 							label={t('enableBackground', 'Enable background')}

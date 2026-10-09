@@ -23,9 +23,10 @@ import {
 	isOverCacheLimit,
 	isSupportedMediaUri,
 	isVideoUri,
+	shouldCacheRemoteAsset,
 	normalizeSettings,
 } from './logic'
-import SettingsComponent, { setPreviewVideoComponent } from './settings'
+import SettingsComponent, { setPreviewVideoComponent, VideoErrorBoundary } from './settings'
 import type { ComponentType } from 'react'
 import type { CacheEntry, Settings } from './logic'
 
@@ -34,7 +35,19 @@ type RootThemeProviderModule = {
 }
 type VideoComponentProps = Record<string, unknown>
 type VideoComponentType = ComponentType<VideoComponentProps>
-type SharedBackgroundBridge = { active: boolean; transparentPanels: boolean }
+type SharedBackgroundBridge = {
+	active: boolean
+	transparentPanels: boolean
+	refresh?: () => void
+}
+type SharedClearVisionBridge = {
+	backgroundUri?: string
+	backgroundColor?: string
+	backgroundOverlay?: string
+	positionX?: number
+	positionY?: number
+	crop?: boolean
+}
 
 const withRootThemeProvider = createFilterGenerator(
 	(_args, _scope, exports) =>
@@ -45,9 +58,9 @@ const withRootThemeProvider = createFilterGenerator(
 
 const withVideoComponent = createFilterGenerator(
 	(_args, _scope, exports) =>
-		typeof (exports as { VideoComponent?: unknown } | undefined)
-			?.VideoComponent === 'function',
-	() => 'VideoComponent',
+		typeof (exports as { getVideoComponent?: unknown } | undefined)
+			?.getVideoComponent === 'function',
+	() => 'getVideoComponent',
 ) as any
 
 let settings = DefaultSettings
@@ -76,10 +89,22 @@ function useCurrentSettings() {
 function updateBackgroundBridge() {
 	const root = globalThis as typeof globalThis & {
 		__revengeNextBgVideoMobile?: SharedBackgroundBridge
+		__revengeNextClearVisionMobile?: SharedClearVisionBridge
 	}
+	const clearVision = root.__revengeNextClearVisionMobile
+	const sourceUri = settings.sourceUri.trim() || clearVision?.backgroundUri || ''
+	const clearVisionBackground = Boolean(
+		clearVision?.backgroundUri || clearVision?.backgroundColor,
+	)
 	root.__revengeNextBgVideoMobile = {
-		active: settings.enabled && isSupportedMediaUri(settings.sourceUri),
+		active:
+			(clearVisionBackground ||
+				(settings.enabled && isSupportedMediaUri(sourceUri))),
 		transparentPanels: settings.transparentPanels,
+		refresh: () => {
+			updateBackgroundBridge()
+			notifySettingsListeners()
+		},
 	}
 }
 
@@ -98,6 +123,7 @@ async function contentLength(uri: string) {
 	if (!/^https?:\/\//i.test(uri)) return undefined
 	try {
 		const response = await fetch(uri, { method: 'HEAD' })
+		if (!response.ok) return undefined
 		const value = Number(response.headers.get('content-length'))
 		return Number.isFinite(value) && value > 0 ? value : undefined
 	} catch {
@@ -122,10 +148,7 @@ async function resolveMediaSource(
 	}
 
 	const expectedSize = await contentLength(sourceUri)
-	if (
-		expectedSize !== undefined &&
-		isOverCacheLimit(expectedSize, value.maxCacheMB)
-	) {
+	if (!shouldCacheRemoteAsset(sourceUri, expectedSize, value.maxCacheMB)) {
 		if (value.cache?.sourceUri !== sourceUri) removeCachedFile(value.cache)
 		return { uri: sourceUri, cache: null }
 	}
@@ -176,6 +199,23 @@ function BackgroundLayer() {
 	const [foreground, setForeground] = useState(
 		AppState.currentState === 'active',
 	)
+	const clearVision = (
+		globalThis as typeof globalThis & {
+			__revengeNextClearVisionMobile?: SharedClearVisionBridge
+		}
+	).__revengeNextClearVisionMobile
+	const ownSourceUri = currentSettings.sourceUri.trim()
+	const sourceUri = ownSourceUri || clearVision?.backgroundUri || ''
+	const cssBackgroundColor = !ownSourceUri ? clearVision?.backgroundColor : undefined
+	const mediaSettings = ownSourceUri
+		? currentSettings
+		: {
+				...currentSettings,
+				mediaType: 'auto' as const,
+				positionX: clearVision?.positionX ?? currentSettings.positionX,
+				positionY: clearVision?.positionY ?? currentSettings.positionY,
+				crop: clearVision?.crop ?? currentSettings.crop,
+			}
 
 	useEffect(() => {
 		const subscription = AppState.addEventListener('change', state =>
@@ -188,8 +228,8 @@ function BackgroundLayer() {
 		let active = true
 		if (
 			!currentSettings.enabled ||
-			!currentSettings.sourceUri ||
-			!isSupportedMediaUri(currentSettings.sourceUri)
+			!sourceUri ||
+			!isSupportedMediaUri(sourceUri)
 		) {
 			setUri(null)
 			return () => {
@@ -198,7 +238,7 @@ function BackgroundLayer() {
 		}
 
 		const generation = ++requestGeneration
-		void resolveMediaSource(currentSettings).then(result => {
+		void resolveMediaSource({ ...mediaSettings, sourceUri }).then(result => {
 			if (!active || generation !== requestGeneration) return
 			setUri(result.uri)
 			const currentCache = currentSettings.cache
@@ -222,30 +262,55 @@ function BackgroundLayer() {
 		currentSettings.mediaType,
 		currentSettings.cache?.sourceUri,
 		currentSettings.cache?.fullPath,
+		sourceUri,
+		clearVision?.positionX,
+		clearVision?.positionY,
+		clearVision?.crop,
 	])
 
-	if (!uri) return null
-	const style = mediaStyle(currentSettings, width, height)
-	const video = isVideoUri(uri, currentSettings.mediaType)
+	if (!currentSettings.enabled || (!uri && !cssBackgroundColor)) return null
+	const style = mediaStyle(mediaSettings, width, height)
+	const video = uri ? isVideoUri(uri, mediaSettings.mediaType) : false
 	return (
 		<View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
-			{video ? (
+			{cssBackgroundColor ? (
+				<View
+					style={[
+						StyleSheet.absoluteFillObject,
+						{ backgroundColor: cssBackgroundColor },
+					]}
+				/>
+			) : null}
+			{uri && video ? (
 				videoComponent ? (
-					createElement(videoComponent, {
-						source: { uri },
-						resizeMode: currentSettings.crop ? 'cover' : 'contain',
-						repeat: currentSettings.loop,
-						paused: currentSettings.pauseInBackground && !foreground,
-						style,
-					})
+					<VideoErrorBoundary key={uri} fallback={null}>
+						{createElement(videoComponent, {
+							source: { uri },
+							resizeMode: mediaSettings.crop ? 'cover' : 'contain',
+							repeat: currentSettings.loop,
+							paused:
+								currentSettings.pauseInBackground && !foreground,
+							style,
+						})}
+					</VideoErrorBoundary>
 				) : null
-			) : (
+			) : uri ? (
 				<Image
 					source={{ uri }}
-					resizeMode={currentSettings.crop ? 'cover' : 'contain'}
+					resizeMode={mediaSettings.crop ? 'cover' : 'contain'}
 					style={style}
 				/>
-			)}
+			) : null}
+			{uri && clearVision?.backgroundOverlay &&
+			clearVision.backgroundOverlay !== 'transparent' ? (
+				<View
+					pointerEvents="none"
+					style={[
+						StyleSheet.absoluteFillObject,
+						{ backgroundColor: clearVision.backgroundOverlay },
+					]}
+				/>
+			) : null}
 		</View>
 	)
 }
@@ -276,8 +341,9 @@ export default plugin<{ jsonStorage: Settings }>({
 		)
 		cleanup(
 			getModules(withVideoComponent(), exports => {
-				videoComponent = (exports as { VideoComponent?: VideoComponentType })
-					.VideoComponent
+				videoComponent = (
+					exports as { getVideoComponent: () => VideoComponentType }
+				).getVideoComponent()
 				setPreviewVideoComponent(videoComponent)
 				notifySettingsListeners()
 			}),

@@ -4,6 +4,7 @@ import {
 	cacheRelativePath,
 	DefaultSettings,
 	isOverCacheLimit,
+	shouldCacheRemoteAsset,
 	isSupportedMediaUri,
 	isVideoUri,
 	normalizeSettings,
@@ -49,5 +50,12 @@ describe('BgVideo settings and media helpers', () => {
 		expect(base64SizeBytes('aGVsbG8=')).toBe(5)
 		expect(isOverCacheLimit(17 * 1024 * 1024, 16)).toBe(true)
 		expect(isOverCacheLimit(8 * 1024 * 1024, 16)).toBe(false)
+	})
+
+	test('skips base64 caching remote media without a known size', () => {
+		expect(shouldCacheRemoteAsset('https://cdn.example/video.mp4', undefined, 16)).toBe(false)
+		expect(shouldCacheRemoteAsset('https://cdn.example/video.mp4', 8 * 1024 * 1024, 16)).toBe(true)
+		expect(shouldCacheRemoteAsset('https://cdn.example/video.mp4', 17 * 1024 * 1024, 16)).toBe(false)
+		expect(shouldCacheRemoteAsset('content://media/video/42', undefined, 16)).toBe(true)
 	})
 })

@@ -159,3 +159,17 @@ export function isOverCacheLimit(
 ): boolean {
 	return sizeBytes > maxCacheMB * 1024 * 1024
 }
+
+export function shouldCacheRemoteAsset(
+	uri: string,
+	expectedSize: number | undefined,
+	maxCacheMB: number,
+) {
+	if (!/^https?:\/\//i.test(uri)) return true
+	return (
+		expectedSize !== undefined &&
+		Number.isFinite(expectedSize) &&
+		expectedSize > 0 &&
+		!isOverCacheLimit(expectedSize, maxCacheMB)
+	)
+}
