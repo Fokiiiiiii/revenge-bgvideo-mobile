@@ -14,7 +14,7 @@ export default {
 	loopVideo: '動画をループ再生',
 	pauseInBackground: 'アプリがバックグラウンドのとき再生を停止',
 	transparentPanels: 'チャット背景を透過',
-	cacheLimit: 'キャッシュ上限 (MB)',
+	cacheLimit: 'キャッシュ上限 (MB、32MB超の素材は直接再生)',
 	clearBgVideoCache: 'BgVideoのキャッシュを削除',
 	clearCachedBackground: 'キャッシュ済みの背景を削除',
 }

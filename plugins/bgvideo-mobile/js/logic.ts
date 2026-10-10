@@ -178,10 +178,30 @@ video{position:absolute;inset:0;width:100%;height:100%;object-fit:${objectFit};b
 <body>
 <video id="bgvideo" autoplay muted playsinline webkit-playsinline></video>
 <script>
-(()=>{const video=document.getElementById("bgvideo");const mute=()=>{video.muted=true;video.volume=0};video.controls=false;video.loop=${settings.loop};video.src=decodeURIComponent("${encodedUri}");video.addEventListener("play",mute);video.addEventListener("volumechange",mute);video.load();const attempt=video.play();if(attempt&&typeof attempt.catch==="function")attempt.catch(()=>{})})()
+(()=>{const video=document.getElementById("bgvideo");const mute=()=>{video.muted=true;video.volume=0};video.controls=false;video.loop=${settings.loop};video.src=decodeURIComponent("${encodedUri}");video.addEventListener("play",mute);video.addEventListener("volumechange",mute);video.addEventListener("playing",()=>console.info("[BgVideo] video playing"));video.addEventListener("error",()=>console.error("[BgVideo] media error",video.error&&video.error.code));video.load();const attempt=video.play();if(attempt&&typeof attempt.catch==="function")attempt.catch(error=>console.error("[BgVideo] playback failed",error&&error.name||"unknown"))})()
 </script>
 </body>
 </html>`
+}
+
+export function videoBaseUrl(uri: string): string {
+	try {
+		const url = new URL(uri)
+		if (url.protocol === 'http:' || url.protocol === 'https:')
+			return `${url.origin}/`
+		url.pathname = url.pathname.slice(0, url.pathname.lastIndexOf('/') + 1)
+		url.search = ''
+		url.hash = ''
+		return url.href
+	} catch {
+		return 'https://discord.com/'
+	}
+}
+
+export function selectNativeWebViewName(registered: readonly string[]) {
+	if (registered.includes('RNCWebView')) return 'RNCWebView'
+	if (registered.includes('RNCWebViewContainer')) return 'RNCWebViewContainer'
+	return 'RNCWebView'
 }
 
 export function shouldCacheRemoteAsset(
@@ -189,11 +209,12 @@ export function shouldCacheRemoteAsset(
 	expectedSize: number | undefined,
 	maxCacheMB: number,
 ) {
-	if (!/^https?:\/\//i.test(uri)) return true
+	// shortcut: FileModule returns whole files as Base64; stream unknown or >32 MiB media until a native streaming API exists.
+	if (!/^https?:\/\//i.test(uri) || expectedSize === undefined)
+		return false
 	return (
-		expectedSize !== undefined &&
 		Number.isFinite(expectedSize) &&
 		expectedSize > 0 &&
-		!isOverCacheLimit(expectedSize, maxCacheMB)
+		!isOverCacheLimit(expectedSize, Math.min(maxCacheMB, 32))
 	)
 }

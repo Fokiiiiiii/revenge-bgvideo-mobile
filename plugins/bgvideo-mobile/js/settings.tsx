@@ -10,10 +10,18 @@ import {
 	ScrollView,
 	StyleSheet,
 	Text,
+	UIManager,
 	View,
 } from 'react-native'
 import { useTranslator } from './localization'
-import { buildVideoHtml, isSupportedMediaUri, isVideoUri, normalizeSettings } from './logic'
+import {
+	buildVideoHtml,
+	isSupportedMediaUri,
+	isVideoUri,
+	normalizeSettings,
+	selectNativeWebViewName,
+	videoBaseUrl,
+} from './logic'
 import type { PluginSettingsComponent } from '@revenge-mod/plugins/types'
 import type { ComponentProps, ComponentType, ReactNode } from 'react'
 import type { Settings } from './logic'
@@ -45,6 +53,39 @@ export class VideoErrorBoundary extends Component<
 }
 
 let nativeWebView: ComponentType<VideoProps> | undefined
+let nativeWebViewName: string | undefined
+
+function resolveNativeWebViewName() {
+	const registered: string[] = []
+	for (const name of ['RNCWebView', 'RNCWebViewContainer']) {
+		try {
+			if (UIManager.getViewManagerConfig(name)) registered.push(name)
+		} catch {}
+	}
+	const name = selectNativeWebViewName(registered)
+	console.info(
+		'[BgVideo] WebView native component selected',
+		name,
+		registered.length ? 'registered' : 'default fallback',
+	)
+	return name
+}
+
+function ignoreWebViewEvent() {}
+
+function reportWebViewError(kind: string, event: unknown) {
+	if (event instanceof Error) {
+		console.warn(`[BgVideo] ${kind}`, event.message)
+		return
+	}
+	const nativeEvent = (event as { nativeEvent?: Record<string, unknown> } | null)
+		?.nativeEvent
+	console.warn(`[BgVideo] ${kind}`, {
+		code: nativeEvent?.code,
+		statusCode: nativeEvent?.statusCode,
+		didCrash: nativeEvent?.didCrash,
+	})
+}
 
 export function FileVideo({
 	uri,
@@ -60,24 +101,44 @@ export function FileVideo({
 	const source = useMemo(
 		() => ({
 			html: buildVideoHtml(uri, settings),
-			baseUrl: 'https://discord.com/',
+			baseUrl: videoBaseUrl(uri),
 		}),
 		[uri, settings.crop, settings.loop],
 	)
 	if (!visible) return null
 	try {
+		nativeWebViewName ??= resolveNativeWebViewName()
 		nativeWebView ??= requireNativeComponent<VideoProps>(
-			'RNCWebViewContainer',
+			nativeWebViewName,
 		) as ComponentType<VideoProps>
-	} catch {
+	} catch (error) {
+		reportWebViewError('native component unavailable', error)
 		return null
 	}
 	return createElement(nativeWebView, {
 		source,
+		newSource: source,
 		javaScriptEnabled: true,
-		allowFileAccess: true,
+		javaScriptCanOpenWindowsAutomatically: false,
+		mediaPlaybackRequiresUserAction: false,
+		allowFileAccess: uri.startsWith('file://'),
+		allowFileAccessFromFileURLs: false,
+		allowUniversalAccessFromFileURLs: false,
 		cacheEnabled: true,
 		messagingEnabled: false,
+		messagingModuleName: 'BgVideoMobile',
+		onLoadingStart: ignoreWebViewEvent,
+		onLoadingProgress: ignoreWebViewEvent,
+		onLoadingFinish: () => console.info('[BgVideo] WebView document loaded'),
+		onLoadingError: (event: unknown) =>
+			reportWebViewError('WebView load failed', event),
+		onHttpError: (event: unknown) => reportWebViewError('HTTP error', event),
+		onRenderProcessGone: (event: unknown) =>
+			reportWebViewError('WebView process stopped', event),
+		onMessage: ignoreWebViewEvent,
+		onShouldStartLoadWithRequest: ignoreWebViewEvent,
+		mixedContentMode: 'never',
+		setSupportMultipleWindows: false,
 		overScrollMode: 'never',
 		style: [style, { backgroundColor: 'transparent' }],
 	})
@@ -298,7 +359,10 @@ export default function SettingsComponent({ api }: Props) {
 							}
 						/>
 						<TextInput
-							label={t('cacheLimit', 'Cache limit (MB)')}
+							label={t(
+								'cacheLimit',
+								'Cache limit (MB; files over 32 MB play directly)',
+							)}
 							returnKeyType="done"
 							defaultValue={maxCacheMB}
 							onChange={setMaxCacheMB}

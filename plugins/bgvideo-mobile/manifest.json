@@ -4,7 +4,7 @@
   "name": "BgVideo Mobile",
   "description": "Cached image and video backgrounds with mobile viewport controls for Revenge Next.",
   "author": "Fokiiiiiii",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "dependencies": {
     "revenge.api": {
       "version": ">=1 <2"

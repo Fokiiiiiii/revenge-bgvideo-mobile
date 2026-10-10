@@ -12,5 +12,8 @@ describe('BgVideo Japanese messages', () => {
 		expect(translate('en-US', 'enableBackground', 'Enable background')).toBe(
 			'Enable background',
 		)
+		expect(translate('ja', 'cacheLimit', 'Cache limit')).toBe(
+			'キャッシュ上限 (MB、32MB超の素材は直接再生)',
+		)
 	})
 })

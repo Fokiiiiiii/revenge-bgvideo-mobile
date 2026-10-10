@@ -35,8 +35,9 @@ type RootThemeProviderModule = {
 }
 let settings = DefaultSettings
 let saveSettings: ((value: Partial<Settings>) => Promise<unknown>) | undefined
-let rootBackgroundAttached = false
-let requestGeneration = 0
+let rootBackgroundInserted = false
+let chatSurfaceMarkerLogged = false
+let backgroundLayoutLogged = false
 
 function notifySettingsListeners() {
 	for (const listener of settingsListeners) listener()
@@ -161,10 +162,15 @@ function patchChatSurfaceTree(node: ReactNode): ReactNode {
 	if (
 		'visibleMessagesWindowHandler' in props &&
 		props.style != null
-	)
+	) {
+		if (!chatSurfaceMarkerLogged) {
+			console.info('[BgVideo] ChatView surface matched')
+			chatSurfaceMarkerLogged = true
+		}
 		return cloneElement(element, {
 			style: [props.style, transparentChatStyle],
 		})
+	}
 
 	const children = patchChatSurfaceTree(props.children as ReactNode)
 	return children === props.children
@@ -175,14 +181,18 @@ function patchChatSurfaceTree(node: ReactNode): ReactNode {
 function patchChatViewSurface(exports: unknown, cleanup: (callback: () => void) => void) {
 	const component = (exports as { default?: { type?: unknown } } | undefined)
 		?.default
-	if (!component || typeof component.type !== 'function') return
+	if (!component || typeof component.type !== 'function') {
+		console.warn('[BgVideo] ChatView export shape not recognized')
+		return
+	}
+	console.info('[BgVideo] ChatView component hook installed')
 	const original = component.type
 
 	const patched = function (this: unknown, ...args: unknown[]) {
 		const rendered = Reflect.apply(original, this, args) as ReactNode
 		if (!settings.enabled || !settings.transparentPanels) return rendered
 		const chatTree = patchChatSurfaceTree(rendered)
-		return rootBackgroundAttached
+		return rootBackgroundInserted
 			? chatTree
 			: createElement(
 					Fragment,
@@ -228,9 +238,12 @@ function BackgroundLayer() {
 			}
 		}
 
-		const generation = ++requestGeneration
 		void resolveMediaSource({ ...currentSettings, sourceUri }).then(result => {
-			if (!active || generation !== requestGeneration) return
+			if (!active) return
+			console.info(
+				'[BgVideo] media source resolved',
+				result.cache ? 'cached' : result.uri ? 'direct' : 'empty',
+			)
 			setUri(result.uri)
 			const currentCache = currentSettings.cache
 			if (
@@ -258,7 +271,22 @@ function BackgroundLayer() {
 	const style = mediaStyle(currentSettings, width, height)
 	const video = isVideoUri(uri, currentSettings.mediaType)
 	return (
-		<View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
+		<View
+			pointerEvents="none"
+			style={StyleSheet.absoluteFillObject}
+			onLayout={event => {
+				const { width: layerWidth, height: layerHeight } =
+					event.nativeEvent.layout
+				if (!backgroundLayoutLogged && layerWidth > 0 && layerHeight > 0) {
+					backgroundLayoutLogged = true
+					console.info(
+						'[BgVideo] background layer laid out',
+						Math.round(layerWidth),
+						Math.round(layerHeight),
+					)
+				}
+			}}
+		>
 			{video ? (
 				<VideoErrorBoundary key={uri} fallback={null}>
 					<FileVideo
@@ -273,6 +301,8 @@ function BackgroundLayer() {
 					source={{ uri }}
 					resizeMode={currentSettings.crop ? 'cover' : 'contain'}
 					style={style}
+					onLoad={() => console.info('[BgVideo] image loaded')}
+					onError={() => console.warn('[BgVideo] image load failed')}
 				/>
 			)}
 		</View>
@@ -281,7 +311,9 @@ function BackgroundLayer() {
 
 function injectBackground(tree: unknown) {
 	if (!isValidElement(tree)) return tree
-	rootBackgroundAttached = true
+	if (!rootBackgroundInserted)
+		console.info('[BgVideo] RootThemeContextProvider element inserted')
+	rootBackgroundInserted = true
 	return createElement(
 		Fragment,
 		null,
@@ -293,13 +325,14 @@ function injectBackground(tree: unknown) {
 export default plugin<{ jsonStorage: Settings }>({
 	jsonStorage: { load: true, default: DefaultSettings },
 	async start({ cleanup, jsonStorage }) {
-		rootBackgroundAttached = false
-		requestGeneration++
+		rootBackgroundInserted = false
+		chatSurfaceMarkerLogged = false
+		backgroundLayoutLogged = false
 		settings = normalizeSettings(await jsonStorage.get())
 		saveSettings = value => jsonStorage.set(value)
 		cleanup(
-			jsonStorage.subscribe(value => {
-				settings = normalizeSettings(value)
+			jsonStorage.subscribe(() => {
+				settings = normalizeSettings(jsonStorage.cache)
 				notifySettingsListeners()
 			}),
 		)
@@ -308,6 +341,7 @@ export default plugin<{ jsonStorage: Settings }>({
 				'modules/themes/RootThemeContextProvider.native.tsx',
 				exports => {
 					if (typeof exports?.RootThemeContextProvider !== 'function') return
+					console.info('[BgVideo] RootThemeContextProvider hook installed')
 					cleanup(
 						after(
 							exports as Required<RootThemeProviderModule>,
@@ -325,8 +359,9 @@ export default plugin<{ jsonStorage: Settings }>({
 			),
 		)
 		cleanup(() => {
-			requestGeneration++
-			rootBackgroundAttached = false
+			rootBackgroundInserted = false
+			chatSurfaceMarkerLogged = false
+			backgroundLayoutLogged = false
 			saveSettings = undefined
 			settings = DefaultSettings
 			notifySettingsListeners()
