@@ -1,18 +1,19 @@
 import Page from '@revenge-mod/components/Page'
 import { Design } from '@revenge-mod/discord/design'
 import { FileModule } from '@revenge-mod/discord/native'
-import { Component, useState } from 'react'
+import { Component, createElement, useEffect, useMemo, useState } from 'react'
 import {
 	AppState,
 	Image,
 	Pressable,
+	requireNativeComponent,
 	ScrollView,
 	StyleSheet,
 	Text,
 	View,
 } from 'react-native'
 import { useTranslator } from './localization'
-import { isSupportedMediaUri, isVideoUri, normalizeSettings } from './logic'
+import { buildVideoHtml, isSupportedMediaUri, isVideoUri, normalizeSettings } from './logic'
 import type { PluginSettingsComponent } from '@revenge-mod/plugins/types'
 import type { ComponentProps, ComponentType, ReactNode } from 'react'
 import type { Settings } from './logic'
@@ -21,7 +22,6 @@ type Props = ComponentProps<PluginSettingsComponent<{ jsonStorage: Settings }>>
 type VideoProps = Record<string, unknown>
 
 const { Stack, TableRowGroup, TableSwitchRow, TextInput } = Design
-let VideoComponent: ComponentType<VideoProps> | undefined
 
 export class VideoErrorBoundary extends Component<
 	{ children?: ReactNode; fallback?: ReactNode },
@@ -44,10 +44,43 @@ export class VideoErrorBoundary extends Component<
 	}
 }
 
-export function setPreviewVideoComponent(
-	component: ComponentType<VideoProps> | undefined,
-) {
-	VideoComponent = component
+let nativeWebView: ComponentType<VideoProps> | undefined
+
+export function FileVideo({
+	uri,
+	settings,
+	visible,
+	style,
+}: {
+	uri: string
+	settings: Settings
+	visible: boolean
+	style: unknown
+}) {
+	const source = useMemo(
+		() => ({
+			html: buildVideoHtml(uri, settings),
+			baseUrl: 'https://discord.com/',
+		}),
+		[uri, settings.crop, settings.loop],
+	)
+	if (!visible) return null
+	try {
+		nativeWebView ??= requireNativeComponent<VideoProps>(
+			'RNCWebViewContainer',
+		) as ComponentType<VideoProps>
+	} catch {
+		return null
+	}
+	return createElement(nativeWebView, {
+		source,
+		javaScriptEnabled: true,
+		allowFileAccess: true,
+		cacheEnabled: true,
+		messagingEnabled: false,
+		overScrollMode: 'never',
+		style: [style, { backgroundColor: 'transparent' }],
+	})
 }
 
 function toFileUri(path: string) {
@@ -56,10 +89,19 @@ function toFileUri(path: string) {
 
 function Preview({ settings }: { settings: Settings }) {
 	const t = useTranslator()
+	const [foreground, setForeground] = useState(AppState.currentState === 'active')
 	const uri =
 		settings.cache?.sourceUri === settings.sourceUri
 			? toFileUri(settings.cache.fullPath)
 			: settings.sourceUri
+
+	useEffect(() => {
+		const subscription = AppState.addEventListener('change', state =>
+			setForeground(state === 'active'),
+		)
+		return () => subscription.remove()
+	}, [])
+
 	if (!uri)
 		return (
 			<View style={styles.preview}>
@@ -91,23 +133,14 @@ function Preview({ settings }: { settings: Settings }) {
 	const mediaStyle = [StyleSheet.absoluteFillObject, { transform }]
 	return (
 		<View style={styles.preview}>
-			{video && VideoComponent ? (
-				<VideoComponent
-					source={{ uri }}
-					resizeMode={settings.crop ? 'cover' : 'contain'}
-					repeat={settings.loop}
-					paused={
-						settings.pauseInBackground && AppState.currentState !== 'active'
-					}
+			{video ? (
+				<FileVideo
+					key={uri}
+					uri={uri}
+					settings={settings}
+					visible={foreground || !settings.pauseInBackground}
 					style={mediaStyle}
 				/>
-			) : video ? (
-				<Text style={styles.previewText}>
-					{t(
-						'previewPlayerUnavailable',
-						'Video preview is unavailable until the app player module loads.',
-					)}
-				</Text>
 			) : (
 				<Image
 					source={{ uri }}
@@ -257,7 +290,7 @@ export default function SettingsComponent({ api }: Props) {
 						<TableSwitchRow
 							label={t(
 								'transparentPanels',
-								'Transparent panels with ClearVision',
+								'Transparent chat surface',
 							)}
 							value={settings.transparentPanels}
 							onValueChange={(value: boolean) =>

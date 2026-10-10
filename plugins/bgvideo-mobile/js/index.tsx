@@ -1,8 +1,10 @@
 import { FileModule } from '@revenge-mod/discord/native'
+import { getModuleWithImportedPath } from '@revenge-mod/discord/utils/modules/finders'
 import { getModules } from '@revenge-mod/modules/finders'
 import { createFilterGenerator } from '@revenge-mod/modules/finders/filters'
 import { after } from '@revenge-mod/patcher'
 import {
+	cloneElement,
 	createElement,
 	Fragment,
 	isValidElement,
@@ -24,32 +26,15 @@ import {
 	isSupportedMediaUri,
 	isVideoUri,
 	normalizeSettings,
-	resolveVideoComponentModule,
 	shouldCacheRemoteAsset,
 } from './logic'
-import SettingsComponent, { setPreviewVideoComponent, VideoErrorBoundary } from './settings'
-import type { ComponentType } from 'react'
+import SettingsComponent, { FileVideo, VideoErrorBoundary } from './settings'
+import type { ReactElement, ReactNode } from 'react'
 import type { CacheEntry, Settings } from './logic'
 
 type RootThemeProviderModule = {
 	RootThemeContextProvider?: (...args: unknown[]) => unknown
 }
-type VideoComponentProps = Record<string, unknown>
-type VideoComponentType = ComponentType<VideoComponentProps>
-type SharedBackgroundBridge = {
-	active: boolean
-	transparentPanels: boolean
-	refresh?: () => void
-}
-type SharedClearVisionBridge = {
-	backgroundUri?: string
-	backgroundColor?: string
-	backgroundOverlay?: string
-	positionX?: number
-	positionY?: number
-	crop?: boolean
-}
-
 const withRootThemeProvider = createFilterGenerator(
 	(_args, _scope, exports) =>
 		typeof (exports as RootThemeProviderModule | undefined)
@@ -57,15 +42,9 @@ const withRootThemeProvider = createFilterGenerator(
 	() => 'RootThemeContextProvider',
 ) as any
 
-const withVideoComponent = createFilterGenerator(
-	(_args, _scope, exports) =>
-		resolveVideoComponentModule(exports) !== undefined,
-	() => 'getVideoComponent',
-) as any
 
 let settings = DefaultSettings
 let saveSettings: ((value: Partial<Settings>) => Promise<unknown>) | undefined
-let videoComponent: VideoComponentType | undefined
 let requestGeneration = 0
 
 function notifySettingsListeners() {
@@ -84,28 +63,6 @@ function useCurrentSettings() {
 		}
 	}, [])
 	return settings
-}
-
-function updateBackgroundBridge() {
-	const root = globalThis as typeof globalThis & {
-		__revengeNextBgVideoMobile?: SharedBackgroundBridge
-		__revengeNextClearVisionMobile?: SharedClearVisionBridge
-	}
-	const clearVision = root.__revengeNextClearVisionMobile
-	const sourceUri = settings.sourceUri.trim() || clearVision?.backgroundUri || ''
-	const clearVisionBackground = Boolean(
-		clearVision?.backgroundUri || clearVision?.backgroundColor,
-	)
-	root.__revengeNextBgVideoMobile = {
-		active:
-			(clearVisionBackground ||
-				(settings.enabled && isSupportedMediaUri(sourceUri))),
-		transparentPanels: settings.transparentPanels,
-		refresh: () => {
-			updateBackgroundBridge()
-			notifySettingsListeners()
-		},
-	}
 }
 
 function toFileUri(path: string) {
@@ -192,6 +149,56 @@ function mediaStyle(settings: Settings, width: number, height: number) {
 	]
 }
 
+const transparentChatStyle = { backgroundColor: 'transparent' }
+
+// shortcut: re-check this ChatView surface marker after Discord changes the chat tree.
+
+function patchChatSurfaceTree(node: ReactNode): ReactNode {
+	if (Array.isArray(node)) {
+		let changed = false
+		const children = node.map(child => {
+			const patched = patchChatSurfaceTree(child)
+			if (patched !== child) changed = true
+			return patched
+		})
+		return changed ? children : node
+	}
+	if (!isValidElement(node)) return node
+
+	const element = node as ReactElement<Record<string, unknown>>
+	const props = element.props
+	if (
+		'visibleMessagesWindowHandler' in props &&
+		props.style != null
+	)
+		return cloneElement(element, {
+			style: [props.style, transparentChatStyle],
+		})
+
+	const children = patchChatSurfaceTree(props.children as ReactNode)
+	return children === props.children
+		? element
+		: cloneElement(element, { children })
+}
+
+function patchChatViewSurface(exports: unknown, cleanup: (callback: () => void) => void) {
+	const component = (exports as { default?: { type?: unknown } } | undefined)
+		?.default
+	if (!component || typeof component.type !== 'function') return
+	const original = component.type
+
+	const patched = function (this: unknown, ...args: unknown[]) {
+		const rendered = Reflect.apply(original, this, args) as ReactNode
+		return settings.enabled && settings.transparentPanels
+			? patchChatSurfaceTree(rendered)
+			: rendered
+	}
+	component.type = patched
+	cleanup(() => {
+		if (component.type === patched) component.type = original
+	})
+}
+
 function BackgroundLayer() {
 	const currentSettings = useCurrentSettings()
 	const { width, height } = useWindowDimensions()
@@ -199,23 +206,7 @@ function BackgroundLayer() {
 	const [foreground, setForeground] = useState(
 		AppState.currentState === 'active',
 	)
-	const clearVision = (
-		globalThis as typeof globalThis & {
-			__revengeNextClearVisionMobile?: SharedClearVisionBridge
-		}
-	).__revengeNextClearVisionMobile
-	const ownSourceUri = currentSettings.sourceUri.trim()
-	const sourceUri = ownSourceUri || clearVision?.backgroundUri || ''
-	const cssBackgroundColor = !ownSourceUri ? clearVision?.backgroundColor : undefined
-	const mediaSettings = ownSourceUri
-		? currentSettings
-		: {
-				...currentSettings,
-				mediaType: 'auto' as const,
-				positionX: clearVision?.positionX ?? currentSettings.positionX,
-				positionY: clearVision?.positionY ?? currentSettings.positionY,
-				crop: clearVision?.crop ?? currentSettings.crop,
-			}
+	const sourceUri = currentSettings.sourceUri.trim()
 
 	useEffect(() => {
 		const subscription = AppState.addEventListener('change', state =>
@@ -238,7 +229,7 @@ function BackgroundLayer() {
 		}
 
 		const generation = ++requestGeneration
-		void resolveMediaSource({ ...mediaSettings, sourceUri }).then(result => {
+		void resolveMediaSource({ ...currentSettings, sourceUri }).then(result => {
 			if (!active || generation !== requestGeneration) return
 			setUri(result.uri)
 			const currentCache = currentSettings.cache
@@ -247,7 +238,6 @@ function BackgroundLayer() {
 				result.cache?.sourceUri !== currentCache?.sourceUri
 			) {
 				settings = { ...settings, cache: result.cache }
-				updateBackgroundBridge()
 				void saveSettings?.({ cache: result.cache })
 				notifySettingsListeners()
 			}
@@ -262,55 +252,29 @@ function BackgroundLayer() {
 		currentSettings.mediaType,
 		currentSettings.cache?.sourceUri,
 		currentSettings.cache?.fullPath,
-		sourceUri,
-		clearVision?.positionX,
-		clearVision?.positionY,
-		clearVision?.crop,
 	])
 
-	if (!currentSettings.enabled || (!uri && !cssBackgroundColor)) return null
-	const style = mediaStyle(mediaSettings, width, height)
-	const video = uri ? isVideoUri(uri, mediaSettings.mediaType) : false
+	if (!currentSettings.enabled || !uri) return null
+	const style = mediaStyle(currentSettings, width, height)
+	const video = isVideoUri(uri, currentSettings.mediaType)
 	return (
 		<View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
-			{cssBackgroundColor ? (
-				<View
-					style={[
-						StyleSheet.absoluteFillObject,
-						{ backgroundColor: cssBackgroundColor },
-					]}
-				/>
-			) : null}
-			{uri && video ? (
-				videoComponent ? (
-					<VideoErrorBoundary key={uri} fallback={null}>
-						{createElement(videoComponent, {
-							source: { uri },
-							resizeMode: mediaSettings.crop ? 'cover' : 'contain',
-							repeat: currentSettings.loop,
-							paused:
-								currentSettings.pauseInBackground && !foreground,
-							style,
-						})}
-					</VideoErrorBoundary>
-				) : null
-			) : uri ? (
+			{video ? (
+				<VideoErrorBoundary key={uri} fallback={null}>
+					<FileVideo
+						uri={uri}
+						settings={currentSettings}
+						visible={!currentSettings.pauseInBackground || foreground}
+						style={style}
+					/>
+				</VideoErrorBoundary>
+			) : (
 				<Image
 					source={{ uri }}
-					resizeMode={mediaSettings.crop ? 'cover' : 'contain'}
+					resizeMode={currentSettings.crop ? 'cover' : 'contain'}
 					style={style}
 				/>
-			) : null}
-			{uri && clearVision?.backgroundOverlay &&
-			clearVision.backgroundOverlay !== 'transparent' ? (
-				<View
-					pointerEvents="none"
-					style={[
-						StyleSheet.absoluteFillObject,
-						{ backgroundColor: clearVision.backgroundOverlay },
-					]}
-				/>
-			) : null}
+			)}
 		</View>
 	)
 }
@@ -331,18 +295,9 @@ export default plugin<{ jsonStorage: Settings }>({
 		requestGeneration++
 		settings = normalizeSettings(await jsonStorage.get())
 		saveSettings = value => jsonStorage.set(value)
-		updateBackgroundBridge()
 		cleanup(
 			jsonStorage.subscribe(value => {
 				settings = normalizeSettings(value)
-				updateBackgroundBridge()
-				notifySettingsListeners()
-			}),
-		)
-		cleanup(
-			getModules(withVideoComponent(), exports => {
-				videoComponent = resolveVideoComponentModule(exports) as VideoComponentType | undefined
-				setPreviewVideoComponent(videoComponent)
 				notifySettingsListeners()
 			}),
 		)
@@ -355,13 +310,16 @@ export default plugin<{ jsonStorage: Settings }>({
 				)
 			}),
 		)
+		cleanup(
+			getModuleWithImportedPath<{ default?: { type?: unknown } }>(
+				'modules/chat/native/ChatView.tsx',
+				exports => patchChatViewSurface(exports, cleanup),
+			),
+		)
 		cleanup(() => {
 			requestGeneration++
-			videoComponent = undefined
-			setPreviewVideoComponent(undefined)
 			saveSettings = undefined
 			settings = DefaultSettings
-			updateBackgroundBridge()
 			notifySettingsListeners()
 		})
 	},

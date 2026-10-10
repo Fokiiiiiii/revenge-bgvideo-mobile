@@ -1,14 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import {
 	base64SizeBytes,
+	buildVideoHtml,
 	cacheRelativePath,
 	DefaultSettings,
 	isOverCacheLimit,
 	isSupportedMediaUri,
 	isVideoUri,
 	normalizeSettings,
-	resolveVideoComponentExport,
-	resolveVideoComponentModule,
 	shouldCacheRemoteAsset,
 } from '../plugins/bgvideo-mobile/js/logic'
 
@@ -61,35 +60,19 @@ describe('BgVideo settings and media helpers', () => {
 		expect(shouldCacheRemoteAsset('content://media/video/42', undefined, 16)).toBe(true)
 	})
 
-	test('unwraps component exports and React elements', () => {
-		const video = () => null
-		const exotic = { $$typeof: Symbol.for('react.forward_ref') }
-		const element = {
-			$$typeof: Symbol.for('react.transitional.element'),
-			type: video,
-		}
-		const localizedMessages = {
-			getVideoComponent: () => ({ locale: 'ja', ast: [] }),
-		}
-		const videoModule = {
-			Video: video,
-			getVideoComponent() {
-				return this.Video
-			},
-		}
+	test('builds a safe muted WebView video page', () => {
+		const uri = 'https://cdn.example.com/wallpaper.mp4?name=night sky'
+		const cover = buildVideoHtml(uri, { crop: true, loop: true })
+		expect(cover).toContain('video.controls=false')
+		expect(cover).toContain('video.muted=true')
+		expect(cover).toContain('video.loop=true')
+		expect(cover).toContain('object-fit:cover')
+		expect(cover).toContain(encodeURIComponent(uri))
+		expect(cover).toContain('attempt.catch')
+		expect(cover).toContain('background:transparent')
 
-		expect(resolveVideoComponentExport(video)).toBe(video)
-		expect(resolveVideoComponentExport({ default: video })).toBe(video)
-		expect(resolveVideoComponentExport({ Video: video })).toBe(video)
-		expect(resolveVideoComponentExport({ default: { default: video } })).toBe(video)
-		expect(resolveVideoComponentExport(exotic)).toBe(exotic)
-		expect(resolveVideoComponentExport(element)).toBe(video)
-		expect(resolveVideoComponentExport({ default: element })).toBe(video)
-		expect(resolveVideoComponentExport({ default: { locale: 'ja', ast: [] } })).toBeUndefined()
-		expect(resolveVideoComponentModule(localizedMessages)).toBeUndefined()
-		expect(resolveVideoComponentModule(videoModule)).toBe(video)
-		expect(
-			resolveVideoComponentModule({ getVideoComponent: () => { throw new Error('not a video module') } }),
-		).toBeUndefined()
+		const contain = buildVideoHtml(uri, { crop: false, loop: false })
+		expect(contain).toContain('object-fit:contain')
+		expect(contain).toContain('video.loop=false')
 	})
 })

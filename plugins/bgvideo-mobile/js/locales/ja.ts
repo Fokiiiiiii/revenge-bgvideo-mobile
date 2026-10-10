@@ -2,8 +2,6 @@ export default {
 	previewPasteSource: 'プレビューする画像または動画のURIを入力してください。',
 	previewUnsupportedSource:
 		'HTTP(S)、file://、content:// のURIを指定してください。YouTubeには対応していません。',
-	previewPlayerUnavailable:
-		'アプリの動画プレイヤーが読み込まれるまで動画をプレビューできません。',
 	backgroundMedia: '背景メディア',
 	enableBackground: '背景を有効化',
 	imageVideoSource: '画像/動画のURLまたはURI',
@@ -15,7 +13,7 @@ export default {
 	playbackAndCache: '再生とキャッシュ',
 	loopVideo: '動画をループ再生',
 	pauseInBackground: 'アプリがバックグラウンドのとき再生を停止',
-	transparentPanels: 'ClearVisionのパネルを透過',
+	transparentPanels: 'チャット背景を透過',
 	cacheLimit: 'キャッシュ上限 (MB)',
 	clearBgVideoCache: 'BgVideoのキャッシュを削除',
 	clearCachedBackground: 'キャッシュ済みの背景を削除',

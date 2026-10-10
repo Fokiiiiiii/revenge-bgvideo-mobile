@@ -160,56 +160,28 @@ export function isOverCacheLimit(
 	return sizeBytes > maxCacheMB * 1024 * 1024
 }
 
-export function resolveVideoComponentExport(value: unknown): unknown {
-	const moduleExport =
-		value && typeof value === 'object'
-			? (value as Record<string, unknown>)
-			: undefined
-	const defaultExport = moduleExport?.default
-	const videoExport = moduleExport?.Video
-	const defaultValue =
-		defaultExport && typeof defaultExport === 'object'
-			? (defaultExport as Record<string, unknown>)
-			: undefined
-	const videoValue =
-		videoExport && typeof videoExport === 'object'
-			? (videoExport as Record<string, unknown>)
-			: undefined
-	const candidates = [
-		defaultValue?.default,
-		defaultValue?.type,
-		defaultExport,
-		videoValue?.default,
-		videoValue?.type,
-		videoExport,
-		moduleExport?.type,
-		value,
-	]
-	return candidates.find(candidate => {
-		if (typeof candidate === 'function') return true
-		if (!candidate || typeof candidate !== 'object') return false
-		const type = (candidate as { $$typeof?: unknown }).$$typeof
-		return (
-			type === Symbol.for('react.forward_ref') ||
-			type === Symbol.for('react.memo') ||
-			type === Symbol.for('react.lazy')
-		)
-	})
-}
-
-export function resolveVideoComponentModule(value: unknown): unknown {
-	try {
-		const moduleExport =
-			value && (typeof value === 'object' || typeof value === 'function')
-				? (value as Record<string, unknown>)
-				: undefined
-		const getVideoComponent = moduleExport?.getVideoComponent
-		return typeof getVideoComponent === 'function'
-			? resolveVideoComponentExport(getVideoComponent.call(value))
-			: undefined
-	} catch {
-		return undefined
-	}
+export function buildVideoHtml(
+	uri: string,
+	settings: Pick<Settings, 'crop' | 'loop'>,
+) {
+	const objectFit = settings.crop ? 'cover' : 'contain'
+	const encodedUri = encodeURIComponent(uri)
+	return `<!doctype html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<style>
+html,body{width:100%;height:100%;margin:0;padding:0;overflow:hidden;background:transparent}
+video{position:absolute;inset:0;width:100%;height:100%;object-fit:${objectFit};background:transparent}
+</style>
+</head>
+<body>
+<video id="bgvideo" autoplay muted playsinline webkit-playsinline></video>
+<script>
+(()=>{const video=document.getElementById("bgvideo");const mute=()=>{video.muted=true;video.volume=0};video.controls=false;video.loop=${settings.loop};video.src=decodeURIComponent("${encodedUri}");video.addEventListener("play",mute);video.addEventListener("volumechange",mute);video.load();const attempt=video.play();if(attempt&&typeof attempt.catch==="function")attempt.catch(()=>{})})()
+</script>
+</body>
+</html>`
 }
 
 export function shouldCacheRemoteAsset(
