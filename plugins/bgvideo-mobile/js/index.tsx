@@ -1,3 +1,4 @@
+import { FileModule } from '@revenge-mod/discord/native'
 import { getModuleWithImportedPath } from '@revenge-mod/discord/utils/modules/finders'
 import { after } from '@revenge-mod/patcher'
 import {
@@ -17,6 +18,7 @@ import {
 	useWindowDimensions,
 	View,
 } from 'react-native'
+import { connectDiagnostics } from './diagnostics-client'
 import {
 	DefaultSettings,
 	imageFrame,
@@ -28,8 +30,10 @@ import {
 import { resolveMediaSource } from './media'
 import SettingsComponent, { FileVideo, VideoErrorBoundary } from './settings'
 import type { ReactElement, ReactNode } from 'react'
+import type { DiagnosticClient } from './diagnostics-client'
 import type { Settings } from './logic'
 
+let diagnosticClient: DiagnosticClient | undefined
 const RootBackgroundContext = createContext(false)
 type RootThemeProviderModule = {
 	RootThemeContextProvider?: (...args: unknown[]) => unknown
@@ -224,6 +228,7 @@ function BackgroundLayer() {
 	const video = isVideoUri(uri, currentSettings.mediaType)
 	return (
 		<View
+			ref={ref => diagnosticClient?.expose('bgHost', ref)}
 			pointerEvents="none"
 			style={[StyleSheet.absoluteFillObject, { overflow: 'hidden' }]}
 			onLayout={event => {
@@ -314,6 +319,21 @@ export default plugin<{ jsonStorage: Settings }>({
 		chatSurfaceMarkerLogged = false
 		backgroundLayoutLogged = false
 		settings = normalizeSettings(await jsonStorage.get())
+		try {
+			if (
+				await FileModule.fileExists(
+					'/sdcard/Android/data/com.discord/files/.bgvideo-diagnostic',
+				)
+			) {
+				diagnosticClient = connectDiagnostics(revenge)
+				cleanup(() => {
+					diagnosticClient?.disconnect()
+					diagnosticClient = undefined
+				})
+			}
+		} catch (error) {
+			console.warn('[BgDiag] setup failed', String(error))
+		}
 		saveSettings = value => jsonStorage.set(value)
 		cleanup(
 			jsonStorage.subscribe(() => {
