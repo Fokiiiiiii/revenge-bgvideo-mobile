@@ -23,9 +23,9 @@ import {
 	isOverCacheLimit,
 	isSupportedMediaUri,
 	isVideoUri,
-	shouldCacheRemoteAsset,
-	resolveVideoComponentExport,
 	normalizeSettings,
+	resolveVideoComponentModule,
+	shouldCacheRemoteAsset,
 } from './logic'
 import SettingsComponent, { setPreviewVideoComponent, VideoErrorBoundary } from './settings'
 import type { ComponentType } from 'react'
@@ -59,8 +59,7 @@ const withRootThemeProvider = createFilterGenerator(
 
 const withVideoComponent = createFilterGenerator(
 	(_args, _scope, exports) =>
-		typeof (exports as { getVideoComponent?: unknown } | undefined)
-			?.getVideoComponent === 'function',
+		resolveVideoComponentModule(exports) !== undefined,
 	() => 'getVideoComponent',
 ) as any
 
@@ -342,9 +341,7 @@ export default plugin<{ jsonStorage: Settings }>({
 		)
 		cleanup(
 			getModules(withVideoComponent(), exports => {
-				videoComponent = resolveVideoComponentExport(
-					(exports as { getVideoComponent: () => unknown }).getVideoComponent(),
-				) as VideoComponentType | undefined
+				videoComponent = resolveVideoComponentModule(exports) as VideoComponentType | undefined
 				setPreviewVideoComponent(videoComponent)
 				notifySettingsListeners()
 			}),

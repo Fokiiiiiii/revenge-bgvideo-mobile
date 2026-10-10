@@ -4,11 +4,12 @@ import {
 	cacheRelativePath,
 	DefaultSettings,
 	isOverCacheLimit,
-	shouldCacheRemoteAsset,
-	resolveVideoComponentExport,
 	isSupportedMediaUri,
 	isVideoUri,
 	normalizeSettings,
+	resolveVideoComponentExport,
+	resolveVideoComponentModule,
+	shouldCacheRemoteAsset,
 } from '../plugins/bgvideo-mobile/js/logic'
 
 describe('BgVideo settings and media helpers', () => {
@@ -60,16 +61,35 @@ describe('BgVideo settings and media helpers', () => {
 		expect(shouldCacheRemoteAsset('content://media/video/42', undefined, 16)).toBe(true)
 	})
 
-	test('unwraps Video from the MediaEngine module wrapper', () => {
+	test('unwraps component exports and React elements', () => {
 		const video = () => null
 		const exotic = { $$typeof: Symbol.for('react.forward_ref') }
+		const element = {
+			$$typeof: Symbol.for('react.transitional.element'),
+			type: video,
+		}
+		const localizedMessages = {
+			getVideoComponent: () => ({ locale: 'ja', ast: [] }),
+		}
+		const videoModule = {
+			Video: video,
+			getVideoComponent() {
+				return this.Video
+			},
+		}
 
 		expect(resolveVideoComponentExport(video)).toBe(video)
 		expect(resolveVideoComponentExport({ default: video })).toBe(video)
 		expect(resolveVideoComponentExport({ Video: video })).toBe(video)
+		expect(resolveVideoComponentExport({ default: { default: video } })).toBe(video)
 		expect(resolveVideoComponentExport(exotic)).toBe(exotic)
+		expect(resolveVideoComponentExport(element)).toBe(video)
+		expect(resolveVideoComponentExport({ default: element })).toBe(video)
+		expect(resolveVideoComponentExport({ default: { locale: 'ja', ast: [] } })).toBeUndefined()
+		expect(resolveVideoComponentModule(localizedMessages)).toBeUndefined()
+		expect(resolveVideoComponentModule(videoModule)).toBe(video)
 		expect(
-			resolveVideoComponentExport({ default: { locale: 'ja', ast: [] } }),
+			resolveVideoComponentModule({ getVideoComponent: () => { throw new Error('not a video module') } }),
 		).toBeUndefined()
 	})
 })

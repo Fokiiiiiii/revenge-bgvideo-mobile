@@ -165,14 +165,51 @@ export function resolveVideoComponentExport(value: unknown): unknown {
 		value && typeof value === 'object'
 			? (value as Record<string, unknown>)
 			: undefined
-	const candidates = [moduleExport?.default, moduleExport?.Video, value]
-	return candidates.find(
-		candidate =>
-			typeof candidate === 'function' ||
-			(candidate !== null &&
-				typeof candidate === 'object' &&
-				'$$typeof' in candidate),
-	)
+	const defaultExport = moduleExport?.default
+	const videoExport = moduleExport?.Video
+	const defaultValue =
+		defaultExport && typeof defaultExport === 'object'
+			? (defaultExport as Record<string, unknown>)
+			: undefined
+	const videoValue =
+		videoExport && typeof videoExport === 'object'
+			? (videoExport as Record<string, unknown>)
+			: undefined
+	const candidates = [
+		defaultValue?.default,
+		defaultValue?.type,
+		defaultExport,
+		videoValue?.default,
+		videoValue?.type,
+		videoExport,
+		moduleExport?.type,
+		value,
+	]
+	return candidates.find(candidate => {
+		if (typeof candidate === 'function') return true
+		if (!candidate || typeof candidate !== 'object') return false
+		const type = (candidate as { $$typeof?: unknown }).$$typeof
+		return (
+			type === Symbol.for('react.forward_ref') ||
+			type === Symbol.for('react.memo') ||
+			type === Symbol.for('react.lazy')
+		)
+	})
+}
+
+export function resolveVideoComponentModule(value: unknown): unknown {
+	try {
+		const moduleExport =
+			value && (typeof value === 'object' || typeof value === 'function')
+				? (value as Record<string, unknown>)
+				: undefined
+		const getVideoComponent = moduleExport?.getVideoComponent
+		return typeof getVideoComponent === 'function'
+			? resolveVideoComponentExport(getVideoComponent.call(value))
+			: undefined
+	} catch {
+		return undefined
+	}
 }
 
 export function shouldCacheRemoteAsset(
