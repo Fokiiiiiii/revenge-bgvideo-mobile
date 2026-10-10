@@ -35,6 +35,7 @@ type RootThemeProviderModule = {
 }
 let settings = DefaultSettings
 let saveSettings: ((value: Partial<Settings>) => Promise<unknown>) | undefined
+let rootBackgroundAttached = false
 let requestGeneration = 0
 
 function notifySettingsListeners() {
@@ -179,9 +180,18 @@ function patchChatViewSurface(exports: unknown, cleanup: (callback: () => void) 
 
 	const patched = function (this: unknown, ...args: unknown[]) {
 		const rendered = Reflect.apply(original, this, args) as ReactNode
-		return settings.enabled && settings.transparentPanels
-			? patchChatSurfaceTree(rendered)
-			: rendered
+		if (!settings.enabled || !settings.transparentPanels) return rendered
+		const chatTree = patchChatSurfaceTree(rendered)
+		return rootBackgroundAttached
+			? chatTree
+			: createElement(
+					Fragment,
+					null,
+					createElement(BackgroundLayer, {
+						key: 'revenge-bgvideo-chat',
+					}),
+					chatTree,
+				)
 	}
 	component.type = patched
 	cleanup(() => {
@@ -271,6 +281,7 @@ function BackgroundLayer() {
 
 function injectBackground(tree: unknown) {
 	if (!isValidElement(tree)) return tree
+	rootBackgroundAttached = true
 	return createElement(
 		Fragment,
 		null,
@@ -282,6 +293,7 @@ function injectBackground(tree: unknown) {
 export default plugin<{ jsonStorage: Settings }>({
 	jsonStorage: { load: true, default: DefaultSettings },
 	async start({ cleanup, jsonStorage }) {
+		rootBackgroundAttached = false
 		requestGeneration++
 		settings = normalizeSettings(await jsonStorage.get())
 		saveSettings = value => jsonStorage.set(value)
@@ -314,6 +326,7 @@ export default plugin<{ jsonStorage: Settings }>({
 		)
 		cleanup(() => {
 			requestGeneration++
+			rootBackgroundAttached = false
 			saveSettings = undefined
 			settings = DefaultSettings
 			notifySettingsListeners()
