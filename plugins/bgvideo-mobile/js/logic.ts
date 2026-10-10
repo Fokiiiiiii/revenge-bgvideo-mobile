@@ -160,6 +160,21 @@ export function isOverCacheLimit(
 	return sizeBytes > maxCacheMB * 1024 * 1024
 }
 
+export function resolveVideoComponentExport(value: unknown): unknown {
+	const moduleExport =
+		value && typeof value === 'object'
+			? (value as Record<string, unknown>)
+			: undefined
+	const candidates = [moduleExport?.default, moduleExport?.Video, value]
+	return candidates.find(
+		candidate =>
+			typeof candidate === 'function' ||
+			(candidate !== null &&
+				typeof candidate === 'object' &&
+				'$$typeof' in candidate),
+	)
+}
+
 export function shouldCacheRemoteAsset(
 	uri: string,
 	expectedSize: number | undefined,

@@ -5,6 +5,7 @@ import {
 	DefaultSettings,
 	isOverCacheLimit,
 	shouldCacheRemoteAsset,
+	resolveVideoComponentExport,
 	isSupportedMediaUri,
 	isVideoUri,
 	normalizeSettings,
@@ -57,5 +58,18 @@ describe('BgVideo settings and media helpers', () => {
 		expect(shouldCacheRemoteAsset('https://cdn.example/video.mp4', 8 * 1024 * 1024, 16)).toBe(true)
 		expect(shouldCacheRemoteAsset('https://cdn.example/video.mp4', 17 * 1024 * 1024, 16)).toBe(false)
 		expect(shouldCacheRemoteAsset('content://media/video/42', undefined, 16)).toBe(true)
+	})
+
+	test('unwraps Video from the MediaEngine module wrapper', () => {
+		const video = () => null
+		const exotic = { $$typeof: Symbol.for('react.forward_ref') }
+
+		expect(resolveVideoComponentExport(video)).toBe(video)
+		expect(resolveVideoComponentExport({ default: video })).toBe(video)
+		expect(resolveVideoComponentExport({ Video: video })).toBe(video)
+		expect(resolveVideoComponentExport(exotic)).toBe(exotic)
+		expect(
+			resolveVideoComponentExport({ default: { locale: 'ja', ast: [] } }),
+		).toBeUndefined()
 	})
 })

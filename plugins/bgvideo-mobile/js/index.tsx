@@ -24,6 +24,7 @@ import {
 	isSupportedMediaUri,
 	isVideoUri,
 	shouldCacheRemoteAsset,
+	resolveVideoComponentExport,
 	normalizeSettings,
 } from './logic'
 import SettingsComponent, { setPreviewVideoComponent, VideoErrorBoundary } from './settings'
@@ -341,9 +342,9 @@ export default plugin<{ jsonStorage: Settings }>({
 		)
 		cleanup(
 			getModules(withVideoComponent(), exports => {
-				videoComponent = (
-					exports as { getVideoComponent: () => VideoComponentType }
-				).getVideoComponent()
+				videoComponent = resolveVideoComponentExport(
+					(exports as { getVideoComponent: () => unknown }).getVideoComponent(),
+				) as VideoComponentType | undefined
 				setPreviewVideoComponent(videoComponent)
 				notifySettingsListeners()
 			}),
