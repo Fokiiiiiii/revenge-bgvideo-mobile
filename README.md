@@ -10,4 +10,4 @@ The plugin uses Revenge's mobile API and dynamic module lookup. Target-app previ
 
 Add this repository to Revenge Next's plugin repositories:
 
-`https://raw.githubusercontent.com/Fokiiiiiii/revenge-bgvideo-mobile/main/plugin-dist/index.json`
+`https://raw.githubusercontent.com/Fokiiiiiii/revenge-bgvideo-mobile/main/plugin-dist`
