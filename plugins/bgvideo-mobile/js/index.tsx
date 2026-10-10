@@ -1,7 +1,5 @@
 import { FileModule } from '@revenge-mod/discord/native'
 import { getModuleWithImportedPath } from '@revenge-mod/discord/utils/modules/finders'
-import { getModules } from '@revenge-mod/modules/finders'
-import { createFilterGenerator } from '@revenge-mod/modules/finders/filters'
 import { after } from '@revenge-mod/patcher'
 import {
 	cloneElement,
@@ -35,14 +33,6 @@ import type { CacheEntry, Settings } from './logic'
 type RootThemeProviderModule = {
 	RootThemeContextProvider?: (...args: unknown[]) => unknown
 }
-const withRootThemeProvider = createFilterGenerator(
-	(_args, _scope, exports) =>
-		typeof (exports as RootThemeProviderModule | undefined)
-			?.RootThemeContextProvider === 'function',
-	() => 'RootThemeContextProvider',
-) as any
-
-
 let settings = DefaultSettings
 let saveSettings: ((value: Partial<Settings>) => Promise<unknown>) | undefined
 let requestGeneration = 0
@@ -302,13 +292,19 @@ export default plugin<{ jsonStorage: Settings }>({
 			}),
 		)
 		cleanup(
-			getModules(withRootThemeProvider(), module => {
-				cleanup(
-					after(module, 'RootThemeContextProvider', tree =>
-						injectBackground(tree),
-					),
-				)
-			}),
+			getModuleWithImportedPath<RootThemeProviderModule>(
+				'modules/themes/RootThemeContextProvider.native.tsx',
+				exports => {
+					if (typeof exports?.RootThemeContextProvider !== 'function') return
+					cleanup(
+						after(
+							exports as Required<RootThemeProviderModule>,
+							'RootThemeContextProvider',
+							tree => injectBackground(tree),
+						),
+					)
+				},
+			),
 		)
 		cleanup(
 			getModuleWithImportedPath<{ default?: { type?: unknown } }>(
