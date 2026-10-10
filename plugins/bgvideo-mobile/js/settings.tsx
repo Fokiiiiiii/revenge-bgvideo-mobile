@@ -10,20 +10,25 @@ import {
 	ScrollView,
 	StyleSheet,
 	Text,
+	TurboModuleRegistry,
 	UIManager,
+	useWindowDimensions,
 	View,
 } from 'react-native'
 import { useTranslator } from './localization'
 import {
 	buildVideoHtml,
+	imageFrame,
 	isSupportedMediaUri,
 	isVideoUri,
+	mediaTransform,
 	normalizeSettings,
 	selectNativeWebViewName,
 	videoBaseUrl,
 } from './logic'
 import type { PluginSettingsComponent } from '@revenge-mod/plugins/types'
 import type { ComponentProps, ComponentType, ReactNode } from 'react'
+import type { TurboModule } from 'react-native'
 import type { Settings } from './logic'
 
 type Props = ComponentProps<PluginSettingsComponent<{ jsonStorage: Settings }>>
@@ -73,13 +78,35 @@ function resolveNativeWebViewName() {
 
 function ignoreWebViewEvent() {}
 
+type WebViewModule = TurboModule & {
+	shouldStartLoadWithLockIdentifier(
+		shouldStart: boolean,
+		lockIdentifier: number,
+	): void
+}
+
+function allowWebViewNavigation(event: unknown) {
+	const lockIdentifier = (
+		event as { nativeEvent?: { lockIdentifier?: unknown } } | null
+	)?.nativeEvent?.lockIdentifier
+	if (typeof lockIdentifier !== 'number') return
+	try {
+		TurboModuleRegistry.get<WebViewModule>(
+			'RNCWebView',
+		)?.shouldStartLoadWithLockIdentifier(true, lockIdentifier)
+	} catch (error) {
+		reportWebViewError('WebView navigation decision failed', error)
+	}
+}
+
 function reportWebViewError(kind: string, event: unknown) {
 	if (event instanceof Error) {
 		console.warn(`[BgVideo] ${kind}`, event.message)
 		return
 	}
-	const nativeEvent = (event as { nativeEvent?: Record<string, unknown> } | null)
-		?.nativeEvent
+	const nativeEvent = (
+		event as { nativeEvent?: Record<string, unknown> } | null
+	)?.nativeEvent
 	console.warn(`[BgVideo] ${kind}`, {
 		code: nativeEvent?.code,
 		statusCode: nativeEvent?.statusCode,
@@ -103,7 +130,7 @@ export function FileVideo({
 			html: buildVideoHtml(uri, settings),
 			baseUrl: videoBaseUrl(uri),
 		}),
-		[uri, settings.crop, settings.loop],
+		[uri, settings.crop, settings.loop, settings.positionX, settings.positionY],
 	)
 	if (!visible) return null
 	try {
@@ -136,7 +163,7 @@ export function FileVideo({
 		onRenderProcessGone: (event: unknown) =>
 			reportWebViewError('WebView process stopped', event),
 		onMessage: ignoreWebViewEvent,
-		onShouldStartLoadWithRequest: ignoreWebViewEvent,
+		onShouldStartLoadWithRequest: allowWebViewNavigation,
 		mixedContentMode: 'never',
 		setSupportMultipleWindows: false,
 		overScrollMode: 'never',
@@ -150,11 +177,23 @@ function toFileUri(path: string) {
 
 function Preview({ settings }: { settings: Settings }) {
 	const t = useTranslator()
-	const [foreground, setForeground] = useState(AppState.currentState === 'active')
+	const window = useWindowDimensions()
+	const [foreground, setForeground] = useState(
+		AppState.currentState === 'active',
+	)
+	const [imageSize, setImageSize] = useState<{
+		uri: string
+		width: number
+		height: number
+	} | null>(null)
 	const uri =
 		settings.cache?.sourceUri === settings.sourceUri
 			? toFileUri(settings.cache.fullPath)
 			: settings.sourceUri
+	const ratio = Math.max(window.width, 1) / Math.max(window.height, 1)
+	const width = Math.min(Math.max(window.width - 32, 1), 220 * ratio)
+	const height = width / ratio
+	const frame = { width, height, aspectRatio: ratio }
 
 	useEffect(() => {
 		const subscription = AppState.addEventListener('change', state =>
@@ -165,7 +204,7 @@ function Preview({ settings }: { settings: Settings }) {
 
 	if (!uri)
 		return (
-			<View style={styles.preview}>
+			<View style={[styles.preview, frame]}>
 				<Text style={styles.previewText}>
 					{t(
 						'previewPasteSource',
@@ -176,7 +215,7 @@ function Preview({ settings }: { settings: Settings }) {
 		)
 	if (!isSupportedMediaUri(uri))
 		return (
-			<View style={styles.preview}>
+			<View style={[styles.preview, frame]}>
 				<Text style={styles.previewText}>
 					{t(
 						'previewUnsupportedSource',
@@ -186,27 +225,53 @@ function Preview({ settings }: { settings: Settings }) {
 			</View>
 		)
 	const video = isVideoUri(uri, settings.mediaType)
-	const transform = [
-		{ scale: settings.zoom },
-		{ translateX: ((settings.positionX - 50) / 50) * 56 },
-		{ translateY: ((settings.positionY - 50) / 50) * 32 },
+	const [scale, translateX, translateY] = mediaTransform(
+		settings,
+		width,
+		height,
+	)
+	const videoStyle = [
+		StyleSheet.absoluteFillObject,
+		{ transform: [{ scale }, { translateX }, { translateY }] },
 	]
-	const mediaStyle = [StyleSheet.absoluteFillObject, { transform }]
 	return (
-		<View style={styles.preview}>
+		<View style={[styles.preview, frame, { padding: 0 }]}>
 			{video ? (
-				<FileVideo
-					key={uri}
-					uri={uri}
-					settings={settings}
-					visible={foreground || !settings.pauseInBackground}
-					style={mediaStyle}
-				/>
+				<VideoErrorBoundary key={uri} fallback={null}>
+					<FileVideo
+						uri={uri}
+						settings={settings}
+						visible={foreground || !settings.pauseInBackground}
+						style={videoStyle}
+					/>
+				</VideoErrorBoundary>
 			) : (
 				<Image
 					source={{ uri }}
 					resizeMode={settings.crop ? 'cover' : 'contain'}
-					style={mediaStyle}
+					style={imageFrame(
+						settings,
+						width,
+						height,
+						imageSize?.uri === uri ? imageSize : undefined,
+					)}
+					onLoad={event => {
+						const { width: sourceWidth, height: sourceHeight } =
+							event.nativeEvent.source
+						if (
+							Number.isFinite(sourceWidth) &&
+							Number.isFinite(sourceHeight) &&
+							sourceWidth > 0 &&
+							sourceHeight > 0
+						)
+							setImageSize(current =>
+								current?.uri === uri &&
+								current.width === sourceWidth &&
+								current.height === sourceHeight
+									? current
+									: { uri, width: sourceWidth, height: sourceHeight },
+							)
+					}}
 				/>
 			)}
 		</View>
@@ -220,7 +285,7 @@ const styles = StyleSheet.create({
 		paddingVertical: 8,
 	},
 	preview: {
-		aspectRatio: 16 / 9,
+		alignSelf: 'center',
 		backgroundColor: '#15171b',
 		borderRadius: 12,
 		justifyContent: 'center',
@@ -349,10 +414,7 @@ export default function SettingsComponent({ api }: Props) {
 							}
 						/>
 						<TableSwitchRow
-							label={t(
-								'transparentPanels',
-								'Transparent chat surface',
-							)}
+							label={t('transparentPanels', 'Transparent chat surface')}
 							value={settings.transparentPanels}
 							onValueChange={(value: boolean) =>
 								void api.jsonStorage.set({ transparentPanels: value })

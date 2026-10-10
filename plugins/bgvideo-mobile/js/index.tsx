@@ -1,11 +1,12 @@
-import { FileModule } from '@revenge-mod/discord/native'
 import { getModuleWithImportedPath } from '@revenge-mod/discord/utils/modules/finders'
 import { after } from '@revenge-mod/patcher'
 import {
 	cloneElement,
+	createContext,
 	createElement,
 	Fragment,
 	isValidElement,
+	useContext,
 	useEffect,
 	useState,
 } from 'react'
@@ -17,19 +18,19 @@ import {
 	View,
 } from 'react-native'
 import {
-	base64SizeBytes,
-	cacheRelativePath,
 	DefaultSettings,
-	isOverCacheLimit,
+	imageFrame,
 	isSupportedMediaUri,
 	isVideoUri,
+	mediaTransform,
 	normalizeSettings,
-	shouldCacheRemoteAsset,
 } from './logic'
+import { resolveMediaSource } from './media'
 import SettingsComponent, { FileVideo, VideoErrorBoundary } from './settings'
 import type { ReactElement, ReactNode } from 'react'
-import type { CacheEntry, Settings } from './logic'
+import type { Settings } from './logic'
 
+const RootBackgroundContext = createContext(false)
 type RootThemeProviderModule = {
 	RootThemeContextProvider?: (...args: unknown[]) => unknown
 }
@@ -57,86 +58,16 @@ function useCurrentSettings() {
 	return settings
 }
 
-function toFileUri(path: string) {
-	return path.startsWith('file://') ? path : `file://${path}`
-}
-
-function removeCachedFile(entry: CacheEntry | null) {
-	if (entry)
-		void FileModule.removeFile('cache', entry.relativePath).catch(
-			() => undefined,
-		)
-}
-
-async function contentLength(uri: string) {
-	if (!/^https?:\/\//i.test(uri)) return undefined
-	try {
-		const response = await fetch(uri, { method: 'HEAD' })
-		if (!response.ok) return undefined
-		const value = Number(response.headers.get('content-length'))
-		return Number.isFinite(value) && value > 0 ? value : undefined
-	} catch {
-		return undefined
-	}
-}
-
-async function resolveMediaSource(
-	value: Settings,
-): Promise<{ uri: string | null; cache: CacheEntry | null }> {
-	const sourceUri = value.sourceUri.trim()
-	if (!sourceUri || !isSupportedMediaUri(sourceUri))
-		return { uri: null, cache: null }
-	const existing = value.cache?.sourceUri === sourceUri ? value.cache : null
-	const maxBytes = value.maxCacheMB * 1024 * 1024
-
-	if (existing && existing.sizeBytes <= maxBytes) {
-		try {
-			if (await FileModule.fileExists(existing.fullPath))
-				return { uri: toFileUri(existing.fullPath), cache: existing }
-		} catch {}
-	}
-
-	const expectedSize = await contentLength(sourceUri)
-	if (!shouldCacheRemoteAsset(sourceUri, expectedSize, value.maxCacheMB)) {
-		if (value.cache?.sourceUri !== sourceUri) removeCachedFile(value.cache)
-		return { uri: sourceUri, cache: null }
-	}
-
-	try {
-		// shortcut: base64 caching holds one bounded media file in memory; replace with a streaming native download when available.
-		const data = await FileModule.readAsset(sourceUri, 'base64')
-		const sizeBytes = base64SizeBytes(data)
-		if (isOverCacheLimit(sizeBytes, value.maxCacheMB)) {
-			if (value.cache) removeCachedFile(value.cache)
-			return { uri: sourceUri, cache: null }
-		}
-
-		const relativePath = cacheRelativePath(sourceUri, value.mediaType)
-		const fullPath = await FileModule.writeFile(
-			'cache',
-			relativePath,
-			data,
-			'base64',
-		)
-		const cache = { sourceUri, relativePath, fullPath, sizeBytes }
-		if (value.cache && value.cache.relativePath !== relativePath)
-			removeCachedFile(value.cache)
-		return { uri: toFileUri(fullPath), cache }
-	} catch {
-		if (value.cache?.sourceUri !== sourceUri) removeCachedFile(value.cache)
-		return { uri: sourceUri, cache: null }
-	}
-}
-
 function mediaStyle(settings: Settings, width: number, height: number) {
+	const [scale, translateX, translateY] = mediaTransform(
+		settings,
+		width,
+		height,
+	)
 	return [
 		StyleSheet.absoluteFillObject,
 		{
-			transform: [
-				{ scale: settings.zoom },
-				{ translateX: ((settings.positionX - 50) / 50) * width * 0.18 },
-				{ translateY: ((settings.positionY - 50) / 50) * height * 0.18 },
-			],
+			transform: [{ scale }, { translateX }, { translateY }],
 		},
 	]
 }
@@ -159,10 +90,7 @@ function patchChatSurfaceTree(node: ReactNode): ReactNode {
 
 	const element = node as ReactElement<Record<string, unknown>>
 	const props = element.props
-	if (
-		'visibleMessagesWindowHandler' in props &&
-		props.style != null
-	) {
+	if ('visibleMessagesWindowHandler' in props && props.style != null) {
 		if (!chatSurfaceMarkerLogged) {
 			console.info('[BgVideo] ChatView surface matched')
 			chatSurfaceMarkerLogged = true
@@ -178,7 +106,10 @@ function patchChatSurfaceTree(node: ReactNode): ReactNode {
 		: cloneElement(element, { children })
 }
 
-function patchChatViewSurface(exports: unknown, cleanup: (callback: () => void) => void) {
+function patchChatViewSurface(
+	exports: unknown,
+	cleanup: (callback: () => void) => void,
+) {
 	const component = (exports as { default?: { type?: unknown } } | undefined)
 		?.default
 	if (!component || typeof component.type !== 'function') {
@@ -189,10 +120,13 @@ function patchChatViewSurface(exports: unknown, cleanup: (callback: () => void) 
 	const original = component.type
 
 	const patched = function (this: unknown, ...args: unknown[]) {
+		const currentSettings = useCurrentSettings()
+		const hasRootBackground = useContext(RootBackgroundContext)
 		const rendered = Reflect.apply(original, this, args) as ReactNode
-		if (!settings.enabled || !settings.transparentPanels) return rendered
+		if (!currentSettings.enabled || !currentSettings.transparentPanels)
+			return rendered
 		const chatTree = patchChatSurfaceTree(rendered)
-		return rootBackgroundInserted
+		return hasRootBackground
 			? chatTree
 			: createElement(
 					Fragment,
@@ -211,7 +145,18 @@ function patchChatViewSurface(exports: unknown, cleanup: (callback: () => void) 
 
 function BackgroundLayer() {
 	const currentSettings = useCurrentSettings()
-	const { width, height } = useWindowDimensions()
+	const rootLayer = useContext(RootBackgroundContext)
+	const window = useWindowDimensions()
+	const [layout, setLayout] = useState<{
+		width: number
+		height: number
+	} | null>(null)
+	const { width, height } = layout ?? window
+	const [imageSize, setImageSize] = useState<{
+		uri: string
+		width: number
+		height: number
+	} | null>(null)
 	const [uri, setUri] = useState<string | null>(null)
 	const [foreground, setForeground] = useState(
 		AppState.currentState === 'active',
@@ -237,24 +182,31 @@ function BackgroundLayer() {
 				active = false
 			}
 		}
-
-		void resolveMediaSource({ ...currentSettings, sourceUri }).then(result => {
-			if (!active) return
-			console.info(
-				'[BgVideo] media source resolved',
-				result.cache ? 'cached' : result.uri ? 'direct' : 'empty',
-			)
-			setUri(result.uri)
-			const currentCache = currentSettings.cache
-			if (
-				result.cache?.fullPath !== currentCache?.fullPath ||
-				result.cache?.sourceUri !== currentCache?.sourceUri
-			) {
-				settings = { ...settings, cache: result.cache }
-				void saveSettings?.({ cache: result.cache })
-				notifySettingsListeners()
-			}
-		})
+		void resolveMediaSource({ ...currentSettings, sourceUri })
+			.then(result => {
+				if (!active) return
+				console.info(
+					'[BgVideo] media source resolved',
+					result.cache ? 'cached' : result.uri ? 'direct' : 'empty',
+				)
+				setUri(result.uri)
+				const currentCache = currentSettings.cache
+				if (
+					result.cache?.fullPath !== currentCache?.fullPath ||
+					result.cache?.sourceUri !== currentCache?.sourceUri
+				) {
+					settings = { ...settings, cache: result.cache }
+					void saveSettings?.({ cache: result.cache }).catch(() =>
+						console.warn('[BgVideo] cache metadata persist failed'),
+					)
+					notifySettingsListeners()
+				}
+			})
+			.catch(() => {
+				if (!active) return
+				setUri(null)
+				console.warn('[BgVideo] media source resolution failed')
+			})
 		return () => {
 			active = false
 		}
@@ -273,14 +225,21 @@ function BackgroundLayer() {
 	return (
 		<View
 			pointerEvents="none"
-			style={StyleSheet.absoluteFillObject}
+			style={[StyleSheet.absoluteFillObject, { overflow: 'hidden' }]}
 			onLayout={event => {
 				const { width: layerWidth, height: layerHeight } =
 					event.nativeEvent.layout
-				if (!backgroundLayoutLogged && layerWidth > 0 && layerHeight > 0) {
+				if (layerWidth <= 0 || layerHeight <= 0) return
+				setLayout(current =>
+					current?.width === layerWidth && current.height === layerHeight
+						? current
+						: { width: layerWidth, height: layerHeight },
+				)
+				if (!backgroundLayoutLogged) {
 					backgroundLayoutLogged = true
 					console.info(
 						'[BgVideo] background layer laid out',
+						rootLayer ? 'root' : 'chat',
 						Math.round(layerWidth),
 						Math.round(layerHeight),
 					)
@@ -300,8 +259,30 @@ function BackgroundLayer() {
 				<Image
 					source={{ uri }}
 					resizeMode={currentSettings.crop ? 'cover' : 'contain'}
-					style={style}
-					onLoad={() => console.info('[BgVideo] image loaded')}
+					style={imageFrame(
+						currentSettings,
+						width,
+						height,
+						imageSize?.uri === uri ? imageSize : undefined,
+					)}
+					onLoad={event => {
+						console.info('[BgVideo] image loaded')
+						const { width: sourceWidth, height: sourceHeight } =
+							event.nativeEvent.source
+						if (
+							Number.isFinite(sourceWidth) &&
+							Number.isFinite(sourceHeight) &&
+							sourceWidth > 0 &&
+							sourceHeight > 0
+						)
+							setImageSize(current =>
+								current?.uri === uri &&
+								current.width === sourceWidth &&
+								current.height === sourceHeight
+									? current
+									: { uri, width: sourceWidth, height: sourceHeight },
+							)
+					}}
 					onError={() => console.warn('[BgVideo] image load failed')}
 				/>
 			)}
@@ -315,10 +296,14 @@ function injectBackground(tree: unknown) {
 		console.info('[BgVideo] RootThemeContextProvider element inserted')
 	rootBackgroundInserted = true
 	return createElement(
-		Fragment,
-		null,
-		createElement(BackgroundLayer, { key: 'revenge-bgvideo-mobile' }),
-		tree,
+		RootBackgroundContext.Provider,
+		{ value: true },
+		createElement(
+			Fragment,
+			null,
+			createElement(BackgroundLayer, { key: 'revenge-bgvideo-mobile' }),
+			tree,
+		),
 	)
 }
 

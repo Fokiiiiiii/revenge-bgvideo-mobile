@@ -113,6 +113,87 @@ export function normalizeSettings(value: unknown): Settings {
 	}
 }
 
+function cropTranslation(
+	position: number,
+	imageDimension: number,
+	viewportDimension: number,
+	zoom: number,
+) {
+	// RN scales following translations, so divide the safe rendered offset by zoom.
+	const translation =
+		((position - 50) / 50) *
+		((zoom * imageDimension - viewportDimension) / (2 * zoom))
+	return translation === 0 ? 0 : translation
+}
+
+export function mediaTransform(
+	value: Pick<Settings, 'zoom' | 'positionX' | 'positionY' | 'crop'>,
+	width: number,
+	height: number,
+): [number, number, number] {
+	const scale = value.zoom
+	if (!value.crop)
+		return [
+			scale,
+			((value.positionX - 50) / 50) * width * 0.18,
+			((value.positionY - 50) / 50) * height * 0.18,
+		]
+	return [
+		scale,
+		cropTranslation(value.positionX, width, width, scale),
+		cropTranslation(value.positionY, height, height, scale),
+	]
+}
+
+export function imageFrame(
+	value: Pick<Settings, 'zoom' | 'positionX' | 'positionY' | 'crop'>,
+	width: number,
+	height: number,
+	source?: { width: number; height: number },
+) {
+	const validSource =
+		source &&
+		Number.isFinite(source.width) &&
+		source.width > 0 &&
+		Number.isFinite(source.height) &&
+		source.height > 0
+			? source
+			: undefined
+	const imageWidth = validSource?.width ?? width
+	const imageHeight = validSource?.height ?? height
+	const fitScale = validSource
+		? value.crop
+			? Math.max(width / imageWidth, height / imageHeight)
+			: Math.min(width / imageWidth, height / imageHeight)
+		: 1
+	const frameWidth = imageWidth * fitScale
+	const frameHeight = imageHeight * fitScale
+	const transformValues: [number, number, number] = value.crop
+		? [
+				value.zoom,
+				cropTranslation(value.positionX, frameWidth, width, value.zoom),
+				cropTranslation(value.positionY, frameHeight, height, value.zoom),
+			]
+		: mediaTransform(value, width, height)
+	const transform: [
+		{ scale: number },
+		{ translateX: number },
+		{ translateY: number },
+	] = [
+		{ scale: transformValues[0] },
+		{ translateX: transformValues[1] },
+		{ translateY: transformValues[2] },
+	]
+	return {
+		position: 'absolute' as const,
+		width: frameWidth,
+		height: frameHeight,
+		left: (width - frameWidth) / 2,
+		top: (height - frameHeight) / 2,
+		transform,
+	}
+}
+
 export function isSupportedMediaUri(value: string): boolean {
 	if (
 		/^(?:https?:\/\/)?(?:www\.)?(?:youtube\.com|youtu\.be)(?:\/|$)/i.test(
@@ -162,9 +243,13 @@ export function isOverCacheLimit(
 
 export function buildVideoHtml(
 	uri: string,
-	settings: Pick<Settings, 'crop' | 'loop'>,
+	settings: Pick<Settings, 'crop' | 'loop'> &
+		Partial<Pick<Settings, 'positionX' | 'positionY'>>,
 ) {
 	const objectFit = settings.crop ? 'cover' : 'contain'
+	const objectPosition = settings.crop
+		? `${100 - (settings.positionX ?? 50)}% ${100 - (settings.positionY ?? 50)}%`
+		: '50% 50%'
 	const encodedUri = encodeURIComponent(uri)
 	return `<!doctype html>
 <html>
@@ -172,7 +257,7 @@ export function buildVideoHtml(
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <style>
 html,body{width:100%;height:100%;margin:0;padding:0;overflow:hidden;background:transparent}
-video{position:absolute;inset:0;width:100%;height:100%;object-fit:${objectFit};background:transparent}
+video{position:absolute;inset:0;width:100%;height:100%;object-fit:${objectFit};object-position:${objectPosition};background:transparent}
 </style>
 </head>
 <body>
@@ -210,8 +295,7 @@ export function shouldCacheRemoteAsset(
 	maxCacheMB: number,
 ) {
 	// shortcut: FileModule returns whole files as Base64; stream unknown or >32 MiB media until a native streaming API exists.
-	if (!/^https?:\/\//i.test(uri) || expectedSize === undefined)
-		return false
+	if (!/^https?:\/\//i.test(uri) || expectedSize === undefined) return false
 	return (
 		Number.isFinite(expectedSize) &&
 		expectedSize > 0 &&
