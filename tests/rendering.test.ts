@@ -2,7 +2,7 @@ import { expect, mock, test } from 'bun:test'
 import { act, createElement, memo } from 'react'
 import { create } from 'react-test-renderer'
 import { DefaultSettings } from '../plugins/bgvideo-mobile/js/logic'
-import { FileModule } from './runtime-mocks'
+import { FileModule, tokenFixture } from './runtime-mocks'
 import type { ReactTestRenderer } from 'react-test-renderer'
 import type { Settings } from '../plugins/bgvideo-mobile/js/logic'
 
@@ -177,6 +177,9 @@ test('mounted memoized ChatView reacts to enabled and transparentPanels storage 
 			fixture.updateSettings({ transparentPanels: true })
 			await flushMediaEffects()
 		})
+		expect(
+			tokenFixture.SemanticColor.BACKGROUND_BASE_LOWEST!.dark.opacity,
+		).toBe(0)
 		expect(fixture.chatRenderCount).toBeGreaterThan(initialRenderCount)
 		expect(chatSurface(renderer!).props.style).toEqual([
 			fixture.style,
@@ -192,6 +195,9 @@ test('mounted memoized ChatView reacts to enabled and transparentPanels storage 
 		expect(chatSurface(renderer!).props.style).toBe(fixture.style)
 		expect(backgroundLayerCount(renderer!)).toBe(0)
 		expect(renderer!.root.findAllByType('Image')).toHaveLength(0)
+		expect(
+			tokenFixture.SemanticColor.BACKGROUND_BASE_LOWEST!.dark.opacity,
+		).toBe(1)
 		expect(FileModule.readAsset).not.toHaveBeenCalled()
 	} finally {
 		if (renderer)

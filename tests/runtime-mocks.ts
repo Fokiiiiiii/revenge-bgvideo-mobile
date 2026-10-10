@@ -51,7 +51,47 @@ export const nativeControls = {
 	),
 }
 
-Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+export const tokenFixture = {
+	SemanticColor: Object.fromEntries(
+		[
+			'BACKGROUND_BASE_LOW',
+			'BACKGROUND_BASE_LOWER',
+			'BACKGROUND_BASE_LOWEST',
+		].map(name => [
+			name,
+			{
+				dark: { raw: 'NEUTRAL_69', opacity: 1 },
+				light: { raw: 'NEUTRAL_2', opacity: 1 },
+				midnight: { raw: 'NEUTRAL_100', opacity: 1 },
+				darker: { raw: 'NEUTRAL_86', opacity: 1 },
+			},
+		]),
+	),
+	default: {
+		colors: Object.fromEntries(
+			[
+				'BACKGROUND_BASE_LOW',
+				'BACKGROUND_BASE_LOWER',
+				'BACKGROUND_BASE_LOWEST',
+			].map(name => [name, { name }]),
+		),
+		internal: {
+			resolveSemanticColor: (_mode: string, color: { name: string }) =>
+				tokenFixture.SemanticColor[color.name]?.dark.opacity === 0
+					? '#32333900'
+					: '#323339',
+		},
+	},
+}
+
+Object.assign(globalThis, {
+	IS_REACT_ACT_ENVIRONMENT: true,
+	requestAnimationFrame: (callback: () => void) => setTimeout(callback, 0),
+	cancelAnimationFrame: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
+})
+mock.module('@revenge-mod/discord/common/tokens', () => ({
+	Tokens: tokenFixture,
+}))
 
 mock.module('@revenge-mod/discord/native', () => ({ FileModule }))
 
@@ -92,6 +132,12 @@ mock.module('react-native', () => ({
 				: null,
 	},
 	UIManager: { getViewManagerConfig: nativeControls.getViewManagerConfig },
+	processColor: (value: unknown) =>
+		value === 'transparent'
+			? 0
+			: typeof value === 'string' && value.startsWith('#')
+				? parseInt(value.slice(1), 16)
+				: undefined,
 	useWindowDimensions: () => ({ width: 400, height: 800 }),
 	View: 'View',
 }))

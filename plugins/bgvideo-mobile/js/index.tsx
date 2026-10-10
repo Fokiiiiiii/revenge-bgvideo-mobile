@@ -1,4 +1,4 @@
-import { FileModule } from '@revenge-mod/discord/native'
+import { Tokens } from '@revenge-mod/discord/common/tokens'
 import { getModuleWithImportedPath } from '@revenge-mod/discord/utils/modules/finders'
 import { after } from '@revenge-mod/patcher'
 import {
@@ -14,11 +14,11 @@ import {
 import {
 	AppState,
 	Image,
+	processColor,
 	StyleSheet,
 	useWindowDimensions,
 	View,
 } from 'react-native'
-import { connectDiagnostics } from './diagnostics-client'
 import {
 	DefaultSettings,
 	imageFrame,
@@ -28,12 +28,16 @@ import {
 	normalizeSettings,
 } from './logic'
 import { resolveMediaSource } from './media'
+import { createScreenPainter } from './screens'
 import SettingsComponent, { FileVideo, VideoErrorBoundary } from './settings'
+import { createPanelTransparency } from './transparency'
 import type { ReactElement, ReactNode } from 'react'
-import type { DiagnosticClient } from './diagnostics-client'
 import type { Settings } from './logic'
 
-let diagnosticClient: DiagnosticClient | undefined
+let panelTransparency: ReturnType<typeof createPanelTransparency> | undefined
+let screenPainter: ReturnType<typeof createScreenPainter> | undefined
+let backgroundHost: unknown
+let paintRequest: number | undefined
 const RootBackgroundContext = createContext(false)
 type RootThemeProviderModule = {
 	RootThemeContextProvider?: (...args: unknown[]) => unknown
@@ -44,7 +48,40 @@ let rootBackgroundInserted = false
 let chatSurfaceMarkerLogged = false
 let backgroundLayoutLogged = false
 
+function panelTransparencyActive() {
+	return (
+		settings.enabled &&
+		settings.transparentPanels &&
+		isSupportedMediaUri(settings.sourceUri.trim())
+	)
+}
+
+function scheduleScreenPaint() {
+	if (!screenPainter || paintRequest !== undefined) return
+	paintRequest = requestAnimationFrame(() => {
+		paintRequest = undefined
+		const changed = screenPainter?.apply(
+			backgroundHost,
+			panelTransparencyActive(),
+			panelTransparency?.originalColors ?? [],
+		)
+		if (changed)
+			console.info('[BgVideo] opaque screen backdrops updated', changed)
+	})
+}
+
 function notifySettingsListeners() {
+	const active = panelTransparencyActive()
+	panelTransparency?.setActive(active)
+	if (!active) {
+		screenPainter?.apply(
+			backgroundHost,
+			false,
+			panelTransparency?.originalColors ?? [],
+		)
+		screenPainter?.restore()
+	}
+	scheduleScreenPaint()
 	for (const listener of settingsListeners) listener()
 }
 
@@ -130,6 +167,7 @@ function patchChatViewSurface(
 		if (!currentSettings.enabled || !currentSettings.transparentPanels)
 			return rendered
 		const chatTree = patchChatSurfaceTree(rendered)
+		scheduleScreenPaint()
 		return hasRootBackground
 			? chatTree
 			: createElement(
@@ -168,9 +206,10 @@ function BackgroundLayer() {
 	const sourceUri = currentSettings.sourceUri.trim()
 
 	useEffect(() => {
-		const subscription = AppState.addEventListener('change', state =>
-			setForeground(state === 'active'),
-		)
+		const subscription = AppState.addEventListener('change', state => {
+			setForeground(state === 'active')
+			if (state === 'active') scheduleScreenPaint()
+		})
 		return () => subscription.remove()
 	}, [])
 
@@ -228,13 +267,17 @@ function BackgroundLayer() {
 	const video = isVideoUri(uri, currentSettings.mediaType)
 	return (
 		<View
-			ref={ref => diagnosticClient?.expose('bgHost', ref)}
+			ref={ref => {
+				backgroundHost = ref
+				scheduleScreenPaint()
+			}}
 			pointerEvents="none"
 			style={[StyleSheet.absoluteFillObject, { overflow: 'hidden' }]}
 			onLayout={event => {
 				const { width: layerWidth, height: layerHeight } =
 					event.nativeEvent.layout
 				if (layerWidth <= 0 || layerHeight <= 0) return
+				scheduleScreenPaint()
 				setLayout(current =>
 					current?.width === layerWidth && current.height === layerHeight
 						? current
@@ -319,21 +362,43 @@ export default plugin<{ jsonStorage: Settings }>({
 		chatSurfaceMarkerLogged = false
 		backgroundLayoutLogged = false
 		settings = normalizeSettings(await jsonStorage.get())
-		try {
-			if (
-				await FileModule.fileExists(
-					'/sdcard/Android/data/com.discord/files/.bgvideo-diagnostic',
-				)
-			) {
-				diagnosticClient = connectDiagnostics(revenge)
-				cleanup(() => {
-					diagnosticClient?.disconnect()
-					diagnosticClient = undefined
-				})
-			}
-		} catch (error) {
-			console.warn('[BgDiag] setup failed', String(error))
-		}
+		panelTransparency = createPanelTransparency(Tokens)
+		panelTransparency.setActive(panelTransparencyActive())
+		screenPainter = createScreenPainter(
+			value => StyleSheet.flatten(value as never),
+			value => processColor(value as never),
+			(node, props) => {
+				const renderer = (
+					globalThis as typeof globalThis & {
+						nativeFabricUIManager?: {
+							setNativeProps(node: unknown, props: unknown): void
+						}
+					}
+				).nativeFabricUIManager
+				if (!renderer?.setNativeProps)
+					throw new Error('Fabric painting unavailable')
+				renderer.setNativeProps(node, props)
+			},
+		)
+		console.info(
+			'[BgVideo] background token transparency ready',
+			panelTransparency.tokenCount,
+		)
+		cleanup(
+			getModuleWithImportedPath<{
+				getRootNavigationRef(): {
+					addListener(event: string, callback: () => void): () => void
+				}
+			}>('modules/main_tabs_v2/RootNavigationRef.native.tsx', exports => {
+				try {
+					cleanup(
+						exports
+							.getRootNavigationRef()
+							.addListener('state', scheduleScreenPaint),
+					)
+				} catch {}
+			}),
+		)
 		saveSettings = value => jsonStorage.set(value)
 		cleanup(
 			jsonStorage.subscribe(() => {
@@ -369,6 +434,18 @@ export default plugin<{ jsonStorage: Settings }>({
 			backgroundLayoutLogged = false
 			saveSettings = undefined
 			settings = DefaultSettings
+			panelTransparency?.restore()
+			screenPainter?.apply(
+				backgroundHost,
+				false,
+				panelTransparency?.originalColors ?? [],
+			)
+			screenPainter?.restore()
+			panelTransparency = undefined
+			screenPainter = undefined
+			backgroundHost = undefined
+			if (paintRequest !== undefined) cancelAnimationFrame(paintRequest)
+			paintRequest = undefined
 			notifySettingsListeners()
 		})
 	},

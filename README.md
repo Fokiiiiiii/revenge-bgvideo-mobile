@@ -6,7 +6,16 @@ Build with Bun: bun install, then bun run build. The JS bundle is generated unde
 
 The plugin uses Revenge's mobile API and dynamic module lookup. Target-app preview and playback still need validation with the latest release.
 
-## v1.0.10
+## v1.0.12
+
+- Applies transparency to the current client's 12 background tokens across dark/light/darker/midnight themes and gradients.
+- Clears matching full-screen Fabric View backdrops that were already rendered, including after navigation and chat rendering.
+- Restores token opacity and native backdrop colors when disabled or stopped.
+- Removes the temporary diagnostics connector used in v1.0.11.
+
+The opacity mechanism and native backdrop painting were exercised in Discord 348.10 through MCP. The owner confirmed the background became visible. Restart restoration and all screens require validation with the installed v1.0.12 artifact.
+
+## Earlier rendering fixes
 
 - Mounted chat components subscribe to settings changes; root/background fallback selection follows React ancestry.
 - Preview and background share viewport positioning calculations, including the excess width of landscape images.
