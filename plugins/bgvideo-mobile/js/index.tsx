@@ -186,7 +186,12 @@ function patchChatSurfaceTree(
 	const props = element.props
 	if (panel === 'memberCard')
 		return cloneElement(element, {
-			style: [props.style, { backgroundColor: panelColor(panel) }],
+			// A supplied style enables Card's default padding; member rows already pad their content.
+			style: [
+				{ padding: 0 },
+				props.style,
+				{ backgroundColor: panelColor(panel) },
+			],
 		})
 	const marker = 'visibleMessagesWindowHandler' in props && props.style != null
 	const color = panel

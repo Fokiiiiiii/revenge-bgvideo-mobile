@@ -191,10 +191,14 @@ test('mapped headers, status bar and member cards use their CSS shades and resto
 			}),
 	}
 	const card = {
-		default: memo(() =>
+		default: memo((props: { unstyled?: boolean }) =>
 			createElement(
 				'Card',
-				{ testID: 'member-card', style: { padding: 8 } },
+				{
+					testID: props.unstyled ? 'unstyled-member-card' : 'member-card',
+					style: props.unstyled ? undefined : { padding: 8 },
+					height: 56,
+				},
 				createElement('Text', {
 					testID: 'member-label',
 					style: { color: 'white' },
@@ -241,6 +245,7 @@ test('mapped headers, status bar and member cards use their CSS shades and resto
 					createElement(header),
 					createElement(status.default),
 					createElement(card.default),
+					createElement(card.default, { unstyled: true }),
 					createElement(memberScreen.default),
 				),
 			)
@@ -256,11 +261,24 @@ test('mapped headers, status bar and member cards use their CSS shades and resto
 			translucent: true,
 			barStyle: 'light-content',
 		})
+		const memberCard = renderer!.root.findByProps({
+			testID: 'unstyled-member-card',
+		})
+		expect(memberCard.props.height).toBe(56)
+		expect(memberCard.props.style).toEqual([
+			{ padding: 0 },
+			undefined,
+			{ backgroundColor: 'rgba(21,27,48,0.38)' },
+		])
 		expect(
 			renderer!.root.findByProps({ testID: 'member-card' }).props.style,
-		).toEqual([{ padding: 8 }, { backgroundColor: 'rgba(21,27,48,0.38)' }])
+		).toEqual([
+			{ padding: 0 },
+			{ padding: 8 },
+			{ backgroundColor: 'rgba(21,27,48,0.38)' },
+		])
 		expect(
-			renderer!.root.findByProps({ testID: 'member-label' }).props.style,
+			renderer!.root.findAllByProps({ testID: 'member-label' })[0]!.props.style,
 		).toEqual({ color: 'white' })
 		expect(
 			renderer!.root.findByProps({ testID: 'member-screen' }).props.style,
