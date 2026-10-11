@@ -193,30 +193,34 @@ function patchChatSurfaceTree(
 				{ backgroundColor: panelColor(panel) },
 			],
 		})
+	const style = StyleSheet.flatten(props.style as never) as
+		| Record<string, unknown>
+		| undefined
+	const inputSurface =
+		panel === 'input' &&
+		style?.flexDirection === 'column' &&
+		style.overflow === 'hidden' &&
+		typeof style.borderRadius === 'number'
 	const marker = 'visibleMessagesWindowHandler' in props && props.style != null
 	const color = panel
-		? processColor(
-				(
-					StyleSheet.flatten(props.style as never) as
-						| { backgroundColor?: string }
-						| undefined
-				)?.backgroundColor,
-			)
+		? processColor(style?.backgroundColor as never)
 		: undefined
 	const matches =
-		typeof color === 'number' &&
-		[
-			...backgroundBaseColors(),
-			...Object.values(
-				shared.__revengeNextClearVisionMobile?.panelColors ?? {},
-			),
-		].some(value => {
-			const original = processColor(value)
-			return (
-				typeof original === 'number' &&
-				(original & 0xffffff) === (color & 0xffffff)
-			)
-		})
+		inputSurface ||
+		(typeof color === 'number' &&
+			(panel !== 'input' || color !== 0) &&
+			[
+				...backgroundBaseColors(),
+				...Object.values(
+					shared.__revengeNextClearVisionMobile?.panelColors ?? {},
+				),
+			].some(value => {
+				const original = processColor(value)
+				return (
+					typeof original === 'number' &&
+					(original & 0xffffff) === (color & 0xffffff)
+				)
+			}))
 	const children = patchChatSurfaceTree(props.children as ReactNode, panel)
 	if (marker || matches) {
 		if (marker && !chatSurfaceMarkerLogged) {
@@ -280,6 +284,18 @@ function patchChatViewSurface(
 		const rendered = Reflect.apply(original, this, args) as ReactNode
 		if (!currentSettings.enabled || !currentSettings.transparentPanels)
 			return rendered
+		if (exportName === 'NavTTIView') {
+			if (!isValidElement(rendered)) return rendered
+			const style = StyleSheet.flatten(
+				(rendered.props as { style?: never }).style,
+			) as Record<string, unknown> | undefined
+			if (
+				style?.flexDirection !== 'row' ||
+				style.flexShrink !== 0 ||
+				style.zIndex !== 1
+			)
+				return rendered
+		}
 		const chatTree = patchChatSurfaceTree(rendered, panel)
 		scheduleScreenPaint()
 		if (panel === 'memberList') requestAnimationFrame(scheduleScreenPaint)
@@ -628,6 +644,19 @@ export default plugin<{ jsonStorage: Settings }>({
 				'modules/main_tabs_v2/native/shared_components/user_list/UsersFastList.tsx',
 				exports =>
 					patchChatViewSurface(exports, cleanup, 'memberList', 'UsersFastList'),
+			),
+		)
+		cleanup(
+			getModuleWithImportedPath(
+				'modules/tti_analytics/native/navigation/NavTTIView.tsx',
+				exports =>
+					patchChatViewSurface(exports, cleanup, 'header', 'NavTTIView'),
+			),
+		)
+		cleanup(
+			getModuleWithImportedPath(
+				'modules/chat_input/native/FloatingChatInputContainer.tsx',
+				exports => patchChatViewSurface(exports, cleanup, 'input'),
 			),
 		)
 		cleanup(

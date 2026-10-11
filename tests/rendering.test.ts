@@ -170,6 +170,7 @@ test('mapped headers, status bar and member cards use their CSS shades and resto
 	Reflect.set(globalThis, '__revengeNextClearVisionMobile', {
 		panelColors: {
 			header: 'rgba(10,15,33,0.46)',
+			input: 'rgba(10,15,33,0.74)',
 			statusBar: 'transparent',
 			memberCard: 'rgba(21,27,48,0.38)',
 			memberList: 'rgba(9,14,31,0.22)',
@@ -238,6 +239,56 @@ test('mapped headers, status bar and member cards use their CSS shades and resto
 		'modules/main_tabs_v2/native/shared_components/user_list/UsersFastList.tsx',
 		{ UsersFastList: usersList },
 	)
+	const navSurface = {
+		NavTTIView: (props: { body?: boolean }) =>
+			createElement('View', {
+				testID: props.body ? 'nav-body' : 'thread-header',
+				style: props.body
+					? { flex: 1, backgroundColor: '#323339' }
+					: {
+							zIndex: 1,
+							flexDirection: 'row',
+							flexShrink: 0,
+							paddingTop: 40,
+							minHeight: 96,
+							backgroundColor: '#323339',
+						},
+			}),
+	}
+	const floatingInput = {
+		default: () =>
+			createElement(
+				'View',
+				{
+					testID: 'input-outside',
+					style: { paddingHorizontal: 16, backgroundColor: 'transparent' },
+				},
+				createElement(
+					'View',
+					{
+						testID: 'input-frame',
+						style: {
+							backgroundColor: '#292929',
+							borderRadius: 16,
+							flexDirection: 'column',
+							overflow: 'hidden',
+						},
+					},
+					createElement('Text', {
+						testID: 'input-label',
+						style: { color: 'white' },
+					}),
+				),
+			),
+	}
+	moduleExports.set(
+		'modules/tti_analytics/native/navigation/NavTTIView.tsx',
+		navSurface,
+	)
+	moduleExports.set(
+		'modules/chat_input/native/FloatingChatInputContainer.tsx',
+		floatingInput,
+	)
 	const originalUsersList = usersList.render
 	const originalHeader = header.render,
 		originalStatus = status.default,
@@ -260,6 +311,9 @@ test('mapped headers, status bar and member cards use their CSS shades and resto
 					createElement(card.default, { unstyled: true }),
 					createElement(memberScreen.default),
 					createElement(usersList),
+					createElement(navSurface.NavTTIView),
+					createElement(navSurface.NavTTIView, { body: true }),
+					createElement(floatingInput.default),
 				),
 			)
 		})
@@ -280,6 +334,39 @@ test('mapped headers, status bar and member cards use their CSS shades and resto
 			{ flex: 1, backgroundColor: '#323339', paddingHorizontal: 16 },
 			{ backgroundColor: 'rgba(9,14,31,0.22)' },
 		])
+		expect(
+			renderer!.root.findByProps({ testID: 'thread-header' }).props.style,
+		).toEqual([
+			{
+				zIndex: 1,
+				flexDirection: 'row',
+				flexShrink: 0,
+				paddingTop: 40,
+				minHeight: 96,
+				backgroundColor: '#323339',
+			},
+			{ backgroundColor: 'rgba(10,15,33,0.46)' },
+		])
+		expect(
+			renderer!.root.findByProps({ testID: 'nav-body' }).props.style,
+		).toEqual({ flex: 1, backgroundColor: '#323339' })
+		expect(
+			renderer!.root.findByProps({ testID: 'input-frame' }).props.style,
+		).toEqual([
+			{
+				backgroundColor: '#292929',
+				borderRadius: 16,
+				flexDirection: 'column',
+				overflow: 'hidden',
+			},
+			{ backgroundColor: 'rgba(10,15,33,0.74)' },
+		])
+		expect(
+			renderer!.root.findByProps({ testID: 'input-outside' }).props.style,
+		).toEqual({ paddingHorizontal: 16, backgroundColor: 'transparent' })
+		expect(
+			renderer!.root.findByProps({ testID: 'input-label' }).props.style,
+		).toEqual({ color: 'white' })
 		const memberCard = renderer!.root.findByProps({
 			testID: 'unstyled-member-card',
 		})
