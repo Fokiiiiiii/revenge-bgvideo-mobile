@@ -48,6 +48,7 @@ type RootThemeProviderModule = {
 type CssPanelRole = 'background' | 'card' | 'input'
 type ClearVisionBridge = {
 	backgroundOverlay?: string
+	originalBackgroundColors?: string[]
 	panelColors?: Partial<Record<CssPanelRole, string>>
 	refresh?: () => void
 }
@@ -74,6 +75,13 @@ function panelTransparencyActive() {
 	)
 }
 
+function backgroundBaseColors() {
+	return [
+		...(panelTransparency?.originalColors ?? []),
+		...(shared.__revengeNextClearVisionMobile?.originalBackgroundColors ?? []),
+	]
+}
+
 function scheduleScreenPaint() {
 	if (!screenPainter || paintRequest !== undefined) return
 	paintRequest = requestAnimationFrame(() => {
@@ -81,7 +89,7 @@ function scheduleScreenPaint() {
 		const changed = screenPainter?.apply(
 			backgroundHost,
 			panelTransparencyActive(),
-			panelTransparency?.originalColors ?? [],
+			backgroundBaseColors(),
 		)
 		if (changed)
 			console.info('[BgVideo] opaque screen backdrops updated', changed)
@@ -99,11 +107,7 @@ function notifySettingsListeners() {
 	}
 	shared.__revengeNextClearVisionMobile?.refresh?.()
 	if (!active) {
-		screenPainter?.apply(
-			backgroundHost,
-			false,
-			panelTransparency?.originalColors ?? [],
-		)
+		screenPainter?.apply(backgroundHost, false, backgroundBaseColors())
 		screenPainter?.restore()
 	}
 	scheduleScreenPaint()
@@ -171,7 +175,7 @@ function patchChatSurfaceTree(
 	const matches =
 		typeof color === 'number' &&
 		[
-			...(panelTransparency?.originalColors ?? []),
+			...backgroundBaseColors(),
 			...Object.values(
 				shared.__revengeNextClearVisionMobile?.panelColors ?? {},
 			),
@@ -556,11 +560,7 @@ export default plugin<{ jsonStorage: Settings }>({
 			shared.__revengeNextBgVideoMobile = undefined
 			shared.__revengeNextClearVisionMobile?.refresh?.()
 			panelTransparency?.restore()
-			screenPainter?.apply(
-				backgroundHost,
-				false,
-				panelTransparency?.originalColors ?? [],
-			)
+			screenPainter?.apply(backgroundHost, false, backgroundBaseColors())
 			screenPainter?.restore()
 			panelTransparency = undefined
 			screenPainter = undefined

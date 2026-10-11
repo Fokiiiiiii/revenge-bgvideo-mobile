@@ -155,6 +155,59 @@ function chatSurface(renderer: ReactTestRenderer) {
 	return renderer.root.findByProps({ testID: 'chat-surface' })
 }
 
+test('cached message backdrop uses ClearVision baseline colors when CSS loaded before BgVideo', async () => {
+	const restoreActEnvironment = enableActEnvironment()
+	const originalResolver = tokenFixture.default.internal.resolveSemanticColor
+	const originalFabric = Reflect.get(globalThis, 'nativeFabricUIManager')
+	const paint = mock(() => {})
+	Reflect.set(globalThis, 'nativeFabricUIManager', { setNativeProps: paint })
+	tokenFixture.default.internal.resolveSemanticColor = () => '#070b1a'
+	Reflect.set(globalThis, '__revengeNextClearVisionMobile', {
+		originalBackgroundColors: ['#323339'],
+		refresh: () => {},
+	})
+	const node = {}
+	const host = {
+		__internalInstanceHandle: {
+			tag: 5,
+			type: 'RCTView',
+			memoizedProps: { style: { flex: 1, backgroundColor: '#323339' } },
+			stateNode: { node, canonical: { nativeTag: 11 } },
+		},
+	}
+	const fixture = await startFixture({
+		enabled: true,
+		transparentPanels: true,
+		sourceUri: 'file:///wallpaper.png',
+		mediaType: 'image',
+	})
+	let renderer: ReactTestRenderer | undefined
+	try {
+		await act(async () => {
+			renderer = create(createElement(fixture.RootEntry), {
+				createNodeMock: () => host,
+			})
+			await flushMediaEffects()
+		})
+		await act(async () => {
+			await new Promise(resolve => setTimeout(resolve, 5))
+		})
+		expect(paint).toHaveBeenCalledWith(node, { backgroundColor: 0 })
+	} finally {
+		if (renderer)
+			await act(async () => {
+				renderer!.unmount()
+			})
+		fixture.cleanup()
+		tokenFixture.default.internal.resolveSemanticColor = originalResolver
+		Reflect.deleteProperty(globalThis, '__revengeNextClearVisionMobile')
+		if (originalFabric === undefined)
+			Reflect.deleteProperty(globalThis, 'nativeFabricUIManager')
+		else Reflect.set(globalThis, 'nativeFabricUIManager', originalFabric)
+		restoreActEnvironment()
+	}
+})
+
 test('ClearVision shading is a single overlay above the root video background and updates through the bridge', async () => {
 	const restoreActEnvironment = enableActEnvironment()
 	const shared = globalThis as typeof globalThis & {
