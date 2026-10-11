@@ -599,6 +599,18 @@ export default plugin<{ jsonStorage: Settings }>({
 				'modules/main_tabs_v2/native/shared_components/user_list/UserRow.tsx',
 				'memberCard',
 			],
+			[
+				'modules/main_tabs_v2/native/sidebar/details/ChannelDetailsNavigator.tsx',
+				'background',
+			],
+			[
+				'modules/main_tabs_v2/native/sidebar/details/ChannelDetailsScreen.tsx',
+				'memberList',
+			],
+			[
+				'modules/main_tabs_v2/native/sidebar/details/ChannelDetails.tsx',
+				'background',
+			],
 		] as const) {
 			cleanup(
 				getModuleWithImportedPath(path, exports =>

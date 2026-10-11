@@ -172,6 +172,7 @@ test('mapped headers, status bar and member cards use their CSS shades and resto
 			header: 'rgba(10,15,33,0.46)',
 			statusBar: 'transparent',
 			memberCard: 'rgba(21,27,48,0.38)',
+			memberList: 'rgba(9,14,31,0.22)',
 		},
 		refresh: () => {},
 	})
@@ -201,6 +202,18 @@ test('mapped headers, status bar and member cards use their CSS shades and resto
 			),
 		),
 	}
+	const memberScreen = {
+		default: memo(() =>
+			createElement('View', {
+				testID: 'member-screen',
+				style: { backgroundColor: '#323339', flex: 1 },
+			}),
+		),
+	}
+	moduleExports.set(
+		'modules/main_tabs_v2/native/sidebar/details/ChannelDetailsScreen.tsx',
+		memberScreen,
+	)
 	moduleExports.set('@screenHeaders', { ScreenStackHeaderConfig: header })
 	moduleExports.set(
 		'modules/status_bar/native/components/ThemedStatusBar.tsx',
@@ -228,6 +241,7 @@ test('mapped headers, status bar and member cards use their CSS shades and resto
 					createElement(header),
 					createElement(status.default),
 					createElement(card.default),
+					createElement(memberScreen.default),
 				),
 			)
 		})
@@ -248,6 +262,12 @@ test('mapped headers, status bar and member cards use their CSS shades and resto
 		expect(
 			renderer!.root.findByProps({ testID: 'member-label' }).props.style,
 		).toEqual({ color: 'white' })
+		expect(
+			renderer!.root.findByProps({ testID: 'member-screen' }).props.style,
+		).toEqual([
+			{ backgroundColor: '#323339', flex: 1 },
+			{ backgroundColor: 'rgba(9,14,31,0.22)' },
+		])
 	} finally {
 		if (renderer)
 			await act(async () => {
