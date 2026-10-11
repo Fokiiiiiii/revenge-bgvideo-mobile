@@ -130,8 +130,8 @@
         },
         "1.0.19": {
           "url": "https://raw.githubusercontent.com/Fokiiiiiii/revenge-bgvideo-mobile/main/plugin-dist/io.github.fokiiiiiii.revenge.bgvideo-mobile@1.0.19.zip",
-          "sha256": "a06a2ed8d5ad323e28890845f46b25cfb402def9a5fcd19a33494befe9bc5baf",
-          "size": 362,
+          "sha256": "6c6fec4b3387ff77c4281263e7fa45a1037330051c442541c8f2846de6c415ce",
+          "size": 27382,
           "dependencies": {
             "revenge.api": {
               "version": ">=1 <2"
