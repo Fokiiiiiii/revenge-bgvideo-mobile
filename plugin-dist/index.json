@@ -8,7 +8,7 @@
       "description": "Cached image and video backgrounds with mobile viewport controls for Revenge Next.",
       "author": "Fokiiiiiii",
       "channels": {
-        "latest": "1.0.16"
+        "latest": "1.0.17"
       },
       "versions": {
         "1.0.10": {
@@ -93,6 +93,19 @@
           "url": "https://raw.githubusercontent.com/Fokiiiiiii/revenge-bgvideo-mobile/main/plugin-dist/io.github.fokiiiiiii.revenge.bgvideo-mobile@1.0.16.zip",
           "sha256": "5ff9bdedbd35b2b8cbb2169567c663c635cad15000a407b057a2adfd1abf5c4e",
           "size": 27359,
+          "dependencies": {
+            "revenge.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
+        },
+        "1.0.17": {
+          "url": "https://raw.githubusercontent.com/Fokiiiiiii/revenge-bgvideo-mobile/main/plugin-dist/io.github.fokiiiiiii.revenge.bgvideo-mobile@1.0.17.zip",
+          "sha256": "d7e8866388c681e4f8672496bc582cdf5e1f2a525d99f4782cdd89a7c91099a9",
+          "size": 27634,
           "dependencies": {
             "revenge.api": {
               "version": ">=1 <2"

@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'bun:test'
-import { act, createElement, memo } from 'react'
+import { act, createElement, forwardRef, memo } from 'react'
 import { create } from 'react-test-renderer'
 import { DefaultSettings } from '../plugins/bgvideo-mobile/js/logic'
 import { FileModule, tokenFixture } from './runtime-mocks'
@@ -7,6 +7,16 @@ import type { ReactTestRenderer } from 'react-test-renderer'
 import type { Settings } from '../plugins/bgvideo-mobile/js/logic'
 
 const moduleExports = new Map<string, unknown>()
+mock.module('@revenge-mod/modules/finders', () => ({
+	getModules: (_filter: unknown, callback: (exports: unknown) => void) => {
+		const exports = moduleExports.get('@screenHeaders')
+		if (exports) callback(exports)
+		return () => undefined
+	},
+}))
+mock.module('@revenge-mod/modules/finders/filters', () => ({
+	withProps: () => ({}),
+}))
 
 mock.module('@revenge-mod/discord/utils/modules/finders', () => ({
 	getModuleWithImportedPath: (
@@ -154,6 +164,103 @@ function backgroundLayerCount(renderer: ReactTestRenderer) {
 function chatSurface(renderer: ReactTestRenderer) {
 	return renderer.root.findByProps({ testID: 'chat-surface' })
 }
+
+test('mapped headers, status bar and member cards use their CSS shades and restore their exports', async () => {
+	const restoreActEnvironment = enableActEnvironment()
+	Reflect.set(globalThis, '__revengeNextClearVisionMobile', {
+		panelColors: {
+			header: 'rgba(10,15,33,0.46)',
+			statusBar: 'transparent',
+			memberCard: 'rgba(21,27,48,0.38)',
+		},
+		refresh: () => {},
+	})
+	const header = forwardRef(() =>
+		createElement('NativeHeader', {
+			testID: 'native-header',
+			backgroundColor: '#393a41',
+		}),
+	)
+	const status = {
+		default: () =>
+			createElement('NativeStatus', {
+				testID: 'status',
+				backgroundColor: '#323339',
+				barStyle: 'dark-content',
+			}),
+	}
+	const card = {
+		default: memo(() =>
+			createElement(
+				'Card',
+				{ testID: 'member-card', style: { padding: 8 } },
+				createElement('Text', {
+					testID: 'member-label',
+					style: { color: 'white' },
+				}),
+			),
+		),
+	}
+	moduleExports.set('@screenHeaders', { ScreenStackHeaderConfig: header })
+	moduleExports.set(
+		'modules/status_bar/native/components/ThemedStatusBar.tsx',
+		status,
+	)
+	moduleExports.set(
+		'modules/main_tabs_v2/native/shared_components/user_list/UserRow.tsx',
+		card,
+	)
+	const originalHeader = header.render,
+		originalStatus = status.default,
+		originalCard = card.default.type
+	const fixture = await startFixture({
+		enabled: true,
+		transparentPanels: true,
+		sourceUri: 'file:///wallpaper.png',
+	})
+	let renderer: ReactTestRenderer | undefined
+	try {
+		await act(async () => {
+			renderer = create(
+				createElement(
+					'Root',
+					null,
+					createElement(header),
+					createElement(status.default),
+					createElement(card.default),
+				),
+			)
+		})
+		expect(
+			renderer!.root.findByProps({ testID: 'native-header' }).props
+				.backgroundColor,
+		).toBe('rgba(10,15,33,0.46)')
+		expect(
+			renderer!.root.findByProps({ testID: 'status' }).props,
+		).toMatchObject({
+			backgroundColor: 'transparent',
+			translucent: true,
+			barStyle: 'light-content',
+		})
+		expect(
+			renderer!.root.findByProps({ testID: 'member-card' }).props.style,
+		).toEqual([{ padding: 8 }, { backgroundColor: 'rgba(21,27,48,0.38)' }])
+		expect(
+			renderer!.root.findByProps({ testID: 'member-label' }).props.style,
+		).toEqual({ color: 'white' })
+	} finally {
+		if (renderer)
+			await act(async () => {
+				renderer!.unmount()
+			})
+		fixture.cleanup()
+		Reflect.deleteProperty(globalThis, '__revengeNextClearVisionMobile')
+		restoreActEnvironment()
+	}
+	expect(header.render).toBe(originalHeader)
+	expect(status.default).toBe(originalStatus)
+	expect(card.default.type).toBe(originalCard)
+})
 
 test('cached message backdrop uses ClearVision baseline colors when CSS loaded before BgVideo', async () => {
 	const restoreActEnvironment = enableActEnvironment()

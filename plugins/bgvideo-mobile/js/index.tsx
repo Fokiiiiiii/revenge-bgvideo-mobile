@@ -1,6 +1,8 @@
 import { Tokens } from '@revenge-mod/discord/common/tokens'
 import { FileModule } from '@revenge-mod/discord/native'
 import { getModuleWithImportedPath } from '@revenge-mod/discord/utils/modules/finders'
+import { getModules } from '@revenge-mod/modules/finders'
+import { withProps } from '@revenge-mod/modules/finders/filters'
 import { after } from '@revenge-mod/patcher'
 import {
 	cloneElement,
@@ -45,7 +47,14 @@ const RootBackgroundContext = createContext(false)
 type RootThemeProviderModule = {
 	RootThemeContextProvider?: (...args: unknown[]) => unknown
 }
-type CssPanelRole = 'background' | 'card' | 'input'
+type CssPanelRole =
+	| 'background'
+	| 'card'
+	| 'input'
+	| 'header'
+	| 'statusBar'
+	| 'memberList'
+	| 'memberCard'
 type ClearVisionBridge = {
 	backgroundOverlay?: string
 	originalBackgroundColors?: string[]
@@ -80,6 +89,19 @@ function backgroundBaseColors() {
 		...(panelTransparency?.originalColors ?? []),
 		...(shared.__revengeNextClearVisionMobile?.originalBackgroundColors ?? []),
 	]
+}
+
+function panelColor(role: CssPanelRole) {
+	if (role === 'background' || role === 'statusBar')
+		return role === 'statusBar'
+			? (shared.__revengeNextClearVisionMobile?.panelColors?.statusBar ??
+					'transparent')
+			: 'transparent'
+	return (
+		shared.__revengeNextClearVisionMobile?.panelColors?.[role] ??
+		shared.__revengeNextClearVisionMobile?.panelColors?.card ??
+		'transparent'
+	)
 }
 
 function scheduleScreenPaint() {
@@ -162,6 +184,10 @@ function patchChatSurfaceTree(
 	if (!isValidElement(node)) return node
 	const element = node as ReactElement<Record<string, unknown>>
 	const props = element.props
+	if (panel === 'memberCard')
+		return cloneElement(element, {
+			style: [props.style, { backgroundColor: panelColor(panel) }],
+		})
 	const marker = 'visibleMessagesWindowHandler' in props && props.style != null
 	const color = panel
 		? processColor(
@@ -195,17 +221,22 @@ function patchChatSurfaceTree(
 		return cloneElement(element, {
 			style: [
 				props.style,
-				panel && panel !== 'background'
-					? {
-							backgroundColor:
-								shared.__revengeNextClearVisionMobile?.panelColors?.[panel] ??
-								'transparent',
-						}
-					: transparentChatStyle,
+				panel ? { backgroundColor: panelColor(panel) } : transparentChatStyle,
 			],
 			children,
 		})
 	}
+	if (
+		(panel === 'header' || panel === 'statusBar') &&
+		'backgroundColor' in props
+	)
+		return cloneElement(element, {
+			backgroundColor: panelColor(panel),
+			...(panel === 'statusBar'
+				? { translucent: true, barStyle: 'light-content' }
+				: {}),
+			children,
+		})
 	return children === props.children
 		? element
 		: cloneElement(element, { children })
@@ -215,13 +246,19 @@ function patchChatViewSurface(
 	exports: unknown,
 	cleanup: (callback: () => void) => void,
 	panel?: CssPanelRole,
+	exportName = 'default',
 ) {
-	const module = exports as { default?: unknown } | undefined
-	const component = module?.default
+	const module = exports as Record<string, unknown> | undefined
+	const component = module?.[exportName]
 	const target = (typeof component === 'function' ? module : component) as
 		| Record<string, unknown>
 		| undefined
-	const key = typeof component === 'function' ? 'default' : 'type'
+	const key =
+		typeof component === 'function'
+			? exportName
+			: typeof target?.render === 'function'
+				? 'render'
+				: 'type'
 	const original = target?.[key]
 	if (!target || typeof original !== 'function') {
 		console.warn('[BgVideo] background component export shape not recognized')
@@ -240,6 +277,7 @@ function patchChatViewSurface(
 			return rendered
 		const chatTree = patchChatSurfaceTree(rendered, panel)
 		scheduleScreenPaint()
+		if (panel === 'memberList') requestAnimationFrame(scheduleScreenPaint)
 		return panel || hasRootBackground
 			? chatTree
 			: createElement(
@@ -544,6 +582,23 @@ export default plugin<{ jsonStorage: Settings }>({
 			['modules/channel_list_v2/native/RedesignGuildHeader.tsx', 'card'],
 			['modules/main_tabs_v2/native/you_bar/YouBarFloatingShade.tsx', 'input'],
 			['modules/main_tabs_v2/native/you_bar/YouBarBackground.tsx', 'card'],
+			[
+				'modules/main_tabs_v2/native/channel/header/ChannelHeader.tsx',
+				'header',
+			],
+			[
+				'modules/main_tabs_v2/native/channel/header/GuildChannelHeader.tsx',
+				'header',
+			],
+			['modules/status_bar/native/components/ThemedStatusBar.tsx', 'statusBar'],
+			[
+				'modules/main_tabs_v2/native/shared_components/user_list/GuildChannelUserList.tsx',
+				'memberList',
+			],
+			[
+				'modules/main_tabs_v2/native/shared_components/user_list/UserRow.tsx',
+				'memberCard',
+			],
 		] as const) {
 			cleanup(
 				getModuleWithImportedPath(path, exports =>
@@ -551,6 +606,16 @@ export default plugin<{ jsonStorage: Settings }>({
 				),
 			)
 		}
+		cleanup(
+			getModules(withProps('ScreenStackHeaderConfig'), exports =>
+				patchChatViewSurface(
+					exports,
+					cleanup,
+					'header',
+					'ScreenStackHeaderConfig',
+				),
+			),
+		)
 		cleanup(() => {
 			rootBackgroundInserted = false
 			chatSurfaceMarkerLogged = false
