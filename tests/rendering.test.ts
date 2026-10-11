@@ -155,6 +155,164 @@ function chatSurface(renderer: ReactTestRenderer) {
 	return renderer.root.findByProps({ testID: 'chat-surface' })
 }
 
+test('ClearVision shading is a single overlay above the root video background and updates through the bridge', async () => {
+	const restoreActEnvironment = enableActEnvironment()
+	const shared = globalThis as typeof globalThis & {
+		__revengeNextClearVisionMobile?: {
+			backgroundOverlay: string
+			refresh: () => void
+		}
+		__revengeNextBgVideoMobile?: { refresh: () => void }
+	}
+	const refresh = mock(() => {})
+	shared.__revengeNextClearVisionMobile = {
+		backgroundOverlay: 'rgba(7,11,26,0.68)',
+		refresh,
+	}
+	const fixture = await startFixture({
+		enabled: true,
+		transparentPanels: true,
+		sourceUri: 'file:///wallpaper.png',
+		mediaType: 'image',
+	})
+	let renderer: ReactTestRenderer | undefined
+	try {
+		await act(async () => {
+			renderer = create(createElement(fixture.RootEntry))
+			await flushMediaEffects()
+		})
+		expect(
+			renderer!.root.findAllByProps({ testID: 'revenge-bgvideo-shading' }),
+		).toHaveLength(1)
+		expect(
+			renderer!.root
+				.findByProps({ testID: 'revenge-bgvideo-shading' })
+				.props.style.at(-1).backgroundColor,
+		).toBe('rgba(7,11,26,0.68)')
+		await act(async () => {
+			shared.__revengeNextClearVisionMobile!.backgroundOverlay =
+				'rgba(5,8,23,0.73)'
+			shared.__revengeNextBgVideoMobile!.refresh()
+		})
+		expect(
+			renderer!.root
+				.findByProps({ testID: 'revenge-bgvideo-shading' })
+				.props.style.at(-1).backgroundColor,
+		).toBe('rgba(5,8,23,0.73)')
+		expect(refresh.mock.calls.length).toBeGreaterThan(1)
+	} finally {
+		if (renderer)
+			await act(async () => {
+				renderer!.unmount()
+			})
+		fixture.cleanup()
+		shared.__revengeNextClearVisionMobile = undefined
+		restoreActEnvironment()
+	}
+})
+
+test('mapped channel and bottom panels keep their render backgrounds transparent and restore on disable', async () => {
+	const restoreActEnvironment = enableActEnvironment()
+	const paths = [
+		'modules/channel_list_v2/native/components/ChannelListPanelBackdrop.tsx',
+		'modules/channel_list_v2/native/RedesignGuildHeader.tsx',
+		'modules/main_tabs_v2/native/you_bar/YouBarFloatingShade.tsx',
+		'modules/main_tabs_v2/native/you_bar/YouBarBackground.tsx',
+	]
+	const originals = paths.map(
+		(_, index) =>
+			function Panel() {
+				return createElement(
+					'View',
+					{ testID: `panel-${index}`, style: { backgroundColor: '#323339' } },
+					createElement('View', {
+						testID: `button-${index}`,
+						style: { backgroundColor: '#ff0000' },
+					}),
+				)
+			},
+	)
+	const modules = originals.map((component, index) => ({
+		default: index ? memo(component) : component,
+	}))
+	paths.forEach((path, index) => moduleExports.set(path, modules[index]))
+	const fixture = await startFixture({
+		enabled: true,
+		transparentPanels: true,
+		sourceUri: 'file:///wallpaper.png',
+	})
+	let renderer: ReactTestRenderer | undefined
+	try {
+		await act(async () => {
+			renderer = create(
+				createElement(
+					'Root',
+					null,
+					modules.map((module, index) =>
+						createElement(module.default, { key: index }),
+					),
+				),
+			)
+		})
+		for (let index = 0; index < paths.length; index++) {
+			expect(
+				renderer!.root.findByProps({ testID: `panel-${index}` }).props.style,
+			).toEqual([
+				{ backgroundColor: '#323339' },
+				{ backgroundColor: 'transparent' },
+			])
+			expect(
+				renderer!.root.findByProps({ testID: `button-${index}` }).props.style,
+			).toEqual({ backgroundColor: '#ff0000' })
+		}
+		expect(backgroundLayerCount(renderer!)).toBe(0)
+		const shared = globalThis as typeof globalThis & {
+			__revengeNextClearVisionMobile?: unknown
+		}
+		shared.__revengeNextClearVisionMobile = {
+			panelColors: {
+				card: 'rgba(16,20,39,0.64)',
+				input: 'rgba(10,15,33,0.74)',
+			},
+			refresh: () => {},
+		}
+		await act(async () => {
+			fixture.updateSettings({ transparentPanels: true })
+		})
+		for (let index = 0; index < paths.length; index++) {
+			const color =
+				index === 0
+					? 'transparent'
+					: index === 2
+						? 'rgba(10,15,33,0.74)'
+						: 'rgba(16,20,39,0.64)'
+			expect(
+				renderer!.root.findByProps({ testID: `panel-${index}` }).props.style,
+			).toEqual([{ backgroundColor: '#323339' }, { backgroundColor: color }])
+		}
+		await act(async () => {
+			fixture.updateSettings({ enabled: false })
+		})
+		for (let index = 0; index < paths.length; index++)
+			expect(
+				renderer!.root.findByProps({ testID: `panel-${index}` }).props.style,
+			).toEqual({ backgroundColor: '#323339' })
+	} finally {
+		if (renderer)
+			await act(async () => {
+				renderer!.unmount()
+			})
+		fixture.cleanup()
+		restoreActEnvironment()
+	}
+	Reflect.deleteProperty(globalThis, '__revengeNextClearVisionMobile')
+	expect(modules[0]!.default).toBe(originals[0])
+	for (let index = 1; index < modules.length; index++)
+		expect((modules[index]!.default as { type: unknown }).type).toBe(
+			originals[index],
+		)
+})
+
 test('mounted memoized ChatView reacts to enabled and transparentPanels storage changes', async () => {
 	const restoreActEnvironment = enableActEnvironment()
 	const fixture = await startFixture({

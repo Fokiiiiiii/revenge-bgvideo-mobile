@@ -6,6 +6,10 @@ Build with Bun: bun install, then bun run build. The JS bundle is generated unde
 
 The plugin uses Revenge's mobile API and dynamic module lookup. Target-app preview and playback still need validation with the latest release.
 
+## v1.0.14
+
+Channel list backdrops, guild headers and the bottom bar now use mapped render hooks. ClearVision custom CSS can set the global video shade and readable card/input panels. See [release notes](docs/v1.0.14.md).
+
 ## v1.0.12
 
 - Applies transparency to the current client's 12 background tokens across dark/light/darker/midnight themes and gradients.

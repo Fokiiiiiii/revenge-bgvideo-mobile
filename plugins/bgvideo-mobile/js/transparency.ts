@@ -5,13 +5,7 @@ export function createPanelTransparency(tokens: unknown) {
 		'BACKGROUND_BASE_LOWEST',
 		'BACKGROUND_SURFACE_HIGH',
 		'BACKGROUND_SURFACE_HIGHEST',
-		'BG_SURFACE_RAISED',
 		'CHANNEL_BACKGROUND_DEFAULT',
-		'CARD_BACKGROUND_DEFAULT',
-		'CHANNELTEXTAREA_BACKGROUND',
-		'CHAT_INPUT_BACKGROUND',
-		'MODAL_BACKGROUND',
-		'MODAL_FOOTER_BACKGROUND',
 	]
 	const modes = ['dark', 'light', 'midnight', 'darker'] as const
 	const asRecord = (value: unknown): Record<string, unknown> | undefined =>

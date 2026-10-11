@@ -13,7 +13,15 @@ type Fiber = {
 }
 
 type NativePaint = (node: unknown, props: { backgroundColor: number }) => void
-type Style = { flex?: number; backgroundColor?: unknown }
+type Style = {
+	flex?: number
+	backgroundColor?: unknown
+	position?: string
+	left?: number
+	right?: number
+	top?: number
+	bottom?: number
+}
 
 export function createScreenPainter(
 	flatten: (style: unknown) => Style | undefined,
@@ -52,7 +60,18 @@ export function createScreenPainter(
 				if (tag === undefined || !node) continue
 				seen.add(tag)
 				const style = flatten(fiber.memoizedProps?.style)
-				if (style?.flex !== 1) continue
+				if (
+					!style ||
+					(style.flex !== 1 &&
+						!(
+							style.position === 'absolute' &&
+							style.left === 0 &&
+							style.right === 0 &&
+							style.top === 0 &&
+							style.bottom === 0
+						))
+				)
+					continue
 				const value = processColor(style.backgroundColor)
 				if (typeof value !== 'number') continue
 				const original =

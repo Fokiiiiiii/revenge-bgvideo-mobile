@@ -39,6 +39,40 @@ describe('mounted background surfaces', () => {
 		})
 	})
 
+	test('paints a channel absolute-fill backdrop and restores it without touching partial overlays', () => {
+		const paint = mock(() => {})
+		const node = {}
+		const style = {
+			position: 'absolute',
+			left: 0,
+			right: 0,
+			top: 0,
+			bottom: 0,
+			backgroundColor: '#323339',
+		}
+		const view = {
+			tag: 5,
+			type: 'RCTView',
+			memoizedProps: { style },
+			stateNode: { node, canonical: { nativeTag: 7 } },
+		}
+		const partial = {
+			tag: 5,
+			type: 'RCTView',
+			memoizedProps: { style: { ...style, bottom: 60 } },
+			stateNode: { node: {}, canonical: { nativeTag: 8 } },
+		}
+		Object.assign(view, { sibling: partial })
+		const controller = createScreenPainter(flatten, processColor, paint)
+		const host = { __internalInstanceHandle: view }
+		expect(controller.apply(host, true, ['#323339'])).toBe(1)
+		expect(paint).toHaveBeenLastCalledWith(node, { backgroundColor: 0 })
+		expect(controller.apply(host, false, ['#323339'])).toBe(1)
+		expect(paint).toHaveBeenLastCalledWith(node, {
+			backgroundColor: 0xff323339,
+		})
+	})
+
 	test('restores a token-resolved alpha-zero background when disabled', () => {
 		const paint = mock(() => {})
 		const node = {}

@@ -45,6 +45,20 @@ const RootBackgroundContext = createContext(false)
 type RootThemeProviderModule = {
 	RootThemeContextProvider?: (...args: unknown[]) => unknown
 }
+type CssPanelRole = 'background' | 'card' | 'input'
+type ClearVisionBridge = {
+	backgroundOverlay?: string
+	panelColors?: Partial<Record<CssPanelRole, string>>
+	refresh?: () => void
+}
+const shared = globalThis as typeof globalThis & {
+	__revengeNextClearVisionMobile?: ClearVisionBridge
+	__revengeNextBgVideoMobile?: {
+		active: boolean
+		transparentPanels: boolean
+		refresh: () => void
+	}
+}
 let diagnosticClient: DiagnosticClient | undefined
 let settings = DefaultSettings
 let saveSettings: ((value: Partial<Settings>) => Promise<unknown>) | undefined
@@ -77,6 +91,13 @@ function scheduleScreenPaint() {
 function notifySettingsListeners() {
 	const active = panelTransparencyActive()
 	panelTransparency?.setActive(active)
+	if (shared.__revengeNextBgVideoMobile) {
+		shared.__revengeNextBgVideoMobile.active =
+			settings.enabled && isSupportedMediaUri(settings.sourceUri.trim())
+		shared.__revengeNextBgVideoMobile.transparentPanels =
+			settings.transparentPanels
+	}
+	shared.__revengeNextClearVisionMobile?.refresh?.()
 	if (!active) {
 		screenPainter?.apply(
 			backgroundHost,
@@ -121,31 +142,66 @@ const transparentChatStyle = { backgroundColor: 'transparent' }
 
 // shortcut: re-check this ChatView surface marker after Discord changes the chat tree.
 
-function patchChatSurfaceTree(node: ReactNode): ReactNode {
+function patchChatSurfaceTree(
+	node: ReactNode,
+	panel?: CssPanelRole,
+): ReactNode {
 	if (Array.isArray(node)) {
 		let changed = false
 		const children = node.map(child => {
-			const patched = patchChatSurfaceTree(child)
+			const patched = patchChatSurfaceTree(child, panel)
 			if (patched !== child) changed = true
 			return patched
 		})
 		return changed ? children : node
 	}
 	if (!isValidElement(node)) return node
-
 	const element = node as ReactElement<Record<string, unknown>>
 	const props = element.props
-	if ('visibleMessagesWindowHandler' in props && props.style != null) {
-		if (!chatSurfaceMarkerLogged) {
+	const marker = 'visibleMessagesWindowHandler' in props && props.style != null
+	const color = panel
+		? processColor(
+				(
+					StyleSheet.flatten(props.style as never) as
+						| { backgroundColor?: string }
+						| undefined
+				)?.backgroundColor,
+			)
+		: undefined
+	const matches =
+		typeof color === 'number' &&
+		[
+			...(panelTransparency?.originalColors ?? []),
+			...Object.values(
+				shared.__revengeNextClearVisionMobile?.panelColors ?? {},
+			),
+		].some(value => {
+			const original = processColor(value)
+			return (
+				typeof original === 'number' &&
+				(original & 0xffffff) === (color & 0xffffff)
+			)
+		})
+	const children = patchChatSurfaceTree(props.children as ReactNode, panel)
+	if (marker || matches) {
+		if (marker && !chatSurfaceMarkerLogged) {
 			console.info('[BgVideo] ChatView surface matched')
 			chatSurfaceMarkerLogged = true
 		}
 		return cloneElement(element, {
-			style: [props.style, transparentChatStyle],
+			style: [
+				props.style,
+				panel && panel !== 'background'
+					? {
+							backgroundColor:
+								shared.__revengeNextClearVisionMobile?.panelColors?.[panel] ??
+								'transparent',
+						}
+					: transparentChatStyle,
+			],
+			children,
 		})
 	}
-
-	const children = patchChatSurfaceTree(props.children as ReactNode)
 	return children === props.children
 		? element
 		: cloneElement(element, { children })
@@ -154,38 +210,44 @@ function patchChatSurfaceTree(node: ReactNode): ReactNode {
 function patchChatViewSurface(
 	exports: unknown,
 	cleanup: (callback: () => void) => void,
+	panel?: CssPanelRole,
 ) {
-	const component = (exports as { default?: { type?: unknown } } | undefined)
-		?.default
-	if (!component || typeof component.type !== 'function') {
-		console.warn('[BgVideo] ChatView export shape not recognized')
+	const module = exports as { default?: unknown } | undefined
+	const component = module?.default
+	const target = (typeof component === 'function' ? module : component) as
+		| Record<string, unknown>
+		| undefined
+	const key = typeof component === 'function' ? 'default' : 'type'
+	const original = target?.[key]
+	if (!target || typeof original !== 'function') {
+		console.warn('[BgVideo] background component export shape not recognized')
 		return
 	}
-	console.info('[BgVideo] ChatView component hook installed')
-	const original = component.type
-
+	console.info(
+		panel
+			? '[BgVideo] panel component hook installed'
+			: '[BgVideo] ChatView component hook installed',
+	)
 	const patched = function (this: unknown, ...args: unknown[]) {
 		const currentSettings = useCurrentSettings()
 		const hasRootBackground = useContext(RootBackgroundContext)
 		const rendered = Reflect.apply(original, this, args) as ReactNode
 		if (!currentSettings.enabled || !currentSettings.transparentPanels)
 			return rendered
-		const chatTree = patchChatSurfaceTree(rendered)
+		const chatTree = patchChatSurfaceTree(rendered, panel)
 		scheduleScreenPaint()
-		return hasRootBackground
+		return panel || hasRootBackground
 			? chatTree
 			: createElement(
 					Fragment,
 					null,
-					createElement(BackgroundLayer, {
-						key: 'revenge-bgvideo-chat',
-					}),
+					createElement(BackgroundLayer, { key: 'revenge-bgvideo-chat' }),
 					chatTree,
 				)
 	}
-	component.type = patched
+	target[key] = patched
 	cleanup(() => {
-		if (component.type === patched) component.type = original
+		if (target[key] === patched) target[key] = original
 	})
 }
 
@@ -339,6 +401,19 @@ function BackgroundLayer() {
 					onError={() => console.warn('[BgVideo] image load failed')}
 				/>
 			)}
+			{shared.__revengeNextClearVisionMobile?.backgroundOverlay && (
+				<View
+					testID="revenge-bgvideo-shading"
+					pointerEvents="none"
+					style={[
+						StyleSheet.absoluteFillObject,
+						{
+							backgroundColor:
+								shared.__revengeNextClearVisionMobile.backgroundOverlay,
+						},
+					]}
+				/>
+			)}
 		</View>
 	)
 }
@@ -384,8 +459,15 @@ export default plugin<{ jsonStorage: Settings }>({
 		} catch (error) {
 			console.warn('[BgDiag] setup failed', String(error))
 		}
+		shared.__revengeNextBgVideoMobile = {
+			active:
+				settings.enabled && isSupportedMediaUri(settings.sourceUri.trim()),
+			transparentPanels: settings.transparentPanels,
+			refresh: notifySettingsListeners,
+		}
 		panelTransparency = createPanelTransparency(Tokens)
 		panelTransparency.setActive(panelTransparencyActive())
+		shared.__revengeNextClearVisionMobile?.refresh?.()
 		screenPainter = createScreenPainter(
 			value => StyleSheet.flatten(value as never),
 			value => processColor(value as never),
@@ -450,12 +532,29 @@ export default plugin<{ jsonStorage: Settings }>({
 				exports => patchChatViewSurface(exports, cleanup),
 			),
 		)
+		for (const [path, role] of [
+			[
+				'modules/channel_list_v2/native/components/ChannelListPanelBackdrop.tsx',
+				'background',
+			],
+			['modules/channel_list_v2/native/RedesignGuildHeader.tsx', 'card'],
+			['modules/main_tabs_v2/native/you_bar/YouBarFloatingShade.tsx', 'input'],
+			['modules/main_tabs_v2/native/you_bar/YouBarBackground.tsx', 'card'],
+		] as const) {
+			cleanup(
+				getModuleWithImportedPath(path, exports =>
+					patchChatViewSurface(exports, cleanup, role),
+				),
+			)
+		}
 		cleanup(() => {
 			rootBackgroundInserted = false
 			chatSurfaceMarkerLogged = false
 			backgroundLayoutLogged = false
 			saveSettings = undefined
 			settings = DefaultSettings
+			shared.__revengeNextBgVideoMobile = undefined
+			shared.__revengeNextClearVisionMobile?.refresh?.()
 			panelTransparency?.restore()
 			screenPainter?.apply(
 				backgroundHost,

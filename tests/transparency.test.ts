@@ -7,13 +7,7 @@ const names = [
 	'BACKGROUND_BASE_LOWEST',
 	'BACKGROUND_SURFACE_HIGH',
 	'BACKGROUND_SURFACE_HIGHEST',
-	'BG_SURFACE_RAISED',
 	'CHANNEL_BACKGROUND_DEFAULT',
-	'CARD_BACKGROUND_DEFAULT',
-	'CHANNELTEXTAREA_BACKGROUND',
-	'CHAT_INPUT_BACKGROUND',
-	'MODAL_BACKGROUND',
-	'MODAL_FOOTER_BACKGROUND',
 ] as const
 
 const modes = ['dark', 'light', 'midnight', 'darker'] as const
@@ -69,6 +63,24 @@ function opacitySnapshot(definition: Definition) {
 }
 
 describe('BgVideo panel transparency', () => {
+	test('keeps cards, inputs and modal shading under the theme control', () => {
+		const definitions = Object.fromEntries(
+			[
+				'CARD_BACKGROUND_DEFAULT',
+				'CHANNELTEXTAREA_BACKGROUND',
+				'CHAT_INPUT_BACKGROUND',
+				'MODAL_BACKGROUND',
+				'MODAL_FOOTER_BACKGROUND',
+			].map(name => [name, { dark: { raw: 'SHADE', opacity: 0.74 } }]),
+		)
+		const before = JSON.stringify(definitions)
+		const controller = createPanelTransparency({ SemanticColor: definitions })
+		controller.setActive(true)
+		expect(controller.tokenCount).toBe(0)
+		expect(JSON.stringify(definitions)).toBe(before)
+		controller.restore()
+		expect(JSON.stringify(definitions)).toBe(before)
+	})
 	test('makes all four modes and both gradients transparent without changing raw colors', () => {
 		const { definitions, rawColors, tokens } = createFixture()
 		const rawColorsBefore = Object.fromEntries(

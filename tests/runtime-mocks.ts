@@ -120,6 +120,10 @@ mock.module('react-native', () => ({
 			left: 0,
 		},
 		create: (styles: unknown) => styles,
+		flatten: (style: unknown): Record<string, unknown> | undefined =>
+			Array.isArray(style)
+				? Object.assign({}, ...style)
+				: (style as Record<string, unknown> | undefined),
 	},
 	Text: 'Text',
 	TurboModuleRegistry: {
