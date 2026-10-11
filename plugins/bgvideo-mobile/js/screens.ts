@@ -34,6 +34,7 @@ export function createScreenPainter(
 			let root = (host as { __internalInstanceHandle?: Fiber } | null)
 				?.__internalInstanceHandle
 			if (!root) return 0
+			const backgroundTag = (host as { __nativeTag?: number }).__nativeTag
 			for (let depth = 0; root.return && depth < 1000; depth++)
 				root = root.return
 			root = root.stateNode?.current ?? root
@@ -53,6 +54,11 @@ export function createScreenPainter(
 			while (stack.length && visited++ < 20_000) {
 				const fiber = stack.pop()!
 				if (fiber.sibling) stack.push(fiber.sibling)
+				if (
+					backgroundTag !== undefined &&
+					fiber.stateNode?.canonical?.nativeTag === backgroundTag
+				)
+					continue
 				if (fiber.child) stack.push(fiber.child)
 				if (fiber.tag !== 5 || fiber.type !== 'RCTView') continue
 				const tag = fiber.stateNode?.canonical?.nativeTag

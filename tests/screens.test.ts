@@ -12,6 +12,46 @@ const processColor = (value: unknown) =>
 	})[String(value) as '#323339']
 
 describe('mounted background surfaces', () => {
+	test('does not erase the video shading overlay inside its own background host', () => {
+		const paint = mock(() => {})
+		const shade = {
+			tag: 5,
+			type: 'RCTView',
+			memoizedProps: {
+				style: {
+					position: 'absolute',
+					left: 0,
+					right: 0,
+					top: 0,
+					bottom: 0,
+					backgroundColor: '#323339',
+				},
+			},
+			stateNode: { node: { id: 'shade' }, canonical: { nativeTag: 4 } },
+		}
+		const screen = {
+			tag: 5,
+			type: 'RCTView',
+			memoizedProps: { style: { flex: 1, backgroundColor: '#323339' } },
+			stateNode: { node: { id: 'screen' }, canonical: { nativeTag: 1 } },
+		}
+		const background = {
+			tag: 5,
+			type: 'RCTView',
+			stateNode: { node: {}, canonical: { nativeTag: 3 } },
+			child: shade,
+			sibling: screen,
+		}
+		const host = { __nativeTag: 3, __internalInstanceHandle: background }
+		const controller = createScreenPainter(flatten, processColor, paint)
+		expect(controller.apply(host, true, ['#323339'])).toBe(1)
+		expect(paint).toHaveBeenCalledWith(screen.stateNode.node, {
+			backgroundColor: 0,
+		})
+		expect(paint).not.toHaveBeenCalledWith(shade.stateNode.node, {
+			backgroundColor: 0,
+		})
+	})
 	test('paints only matching full-screen native Views and restores original colors', () => {
 		const paint = mock(() => {})
 		const node = {}
