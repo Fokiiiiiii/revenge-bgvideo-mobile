@@ -227,6 +227,18 @@ test('mapped headers, status bar and member cards use their CSS shades and resto
 		'modules/main_tabs_v2/native/shared_components/user_list/UserRow.tsx',
 		card,
 	)
+	const usersList = forwardRef(() =>
+		createElement('FastestList', {
+			testID: 'thread-members',
+			style: { flex: 1, backgroundColor: '#323339', paddingHorizontal: 16 },
+			sections: [],
+		}),
+	)
+	moduleExports.set(
+		'modules/main_tabs_v2/native/shared_components/user_list/UsersFastList.tsx',
+		{ UsersFastList: usersList },
+	)
+	const originalUsersList = usersList.render
 	const originalHeader = header.render,
 		originalStatus = status.default,
 		originalCard = card.default.type
@@ -247,6 +259,7 @@ test('mapped headers, status bar and member cards use their CSS shades and resto
 					createElement(card.default),
 					createElement(card.default, { unstyled: true }),
 					createElement(memberScreen.default),
+					createElement(usersList),
 				),
 			)
 		})
@@ -261,6 +274,12 @@ test('mapped headers, status bar and member cards use their CSS shades and resto
 			translucent: true,
 			barStyle: 'light-content',
 		})
+		expect(
+			renderer!.root.findByProps({ testID: 'thread-members' }).props.style,
+		).toEqual([
+			{ flex: 1, backgroundColor: '#323339', paddingHorizontal: 16 },
+			{ backgroundColor: 'rgba(9,14,31,0.22)' },
+		])
 		const memberCard = renderer!.root.findByProps({
 			testID: 'unstyled-member-card',
 		})
@@ -295,6 +314,7 @@ test('mapped headers, status bar and member cards use their CSS shades and resto
 		Reflect.deleteProperty(globalThis, '__revengeNextClearVisionMobile')
 		restoreActEnvironment()
 	}
+	expect(usersList.render).toBe(originalUsersList)
 	expect(header.render).toBe(originalHeader)
 	expect(status.default).toBe(originalStatus)
 	expect(card.default.type).toBe(originalCard)

@@ -624,6 +624,13 @@ export default plugin<{ jsonStorage: Settings }>({
 			)
 		}
 		cleanup(
+			getModuleWithImportedPath(
+				'modules/main_tabs_v2/native/shared_components/user_list/UsersFastList.tsx',
+				exports =>
+					patchChatViewSurface(exports, cleanup, 'memberList', 'UsersFastList'),
+			),
+		)
+		cleanup(
 			getModules(withProps('ScreenStackHeaderConfig'), exports =>
 				patchChatViewSurface(
 					exports,
