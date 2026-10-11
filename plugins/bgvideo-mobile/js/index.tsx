@@ -1,4 +1,5 @@
 import { Tokens } from '@revenge-mod/discord/common/tokens'
+import { FileModule } from '@revenge-mod/discord/native'
 import { getModuleWithImportedPath } from '@revenge-mod/discord/utils/modules/finders'
 import { after } from '@revenge-mod/patcher'
 import {
@@ -19,6 +20,7 @@ import {
 	useWindowDimensions,
 	View,
 } from 'react-native'
+import { connectDiagnostics } from './diagnostics-client'
 import {
 	DefaultSettings,
 	imageFrame,
@@ -32,6 +34,7 @@ import { createScreenPainter } from './screens'
 import SettingsComponent, { FileVideo, VideoErrorBoundary } from './settings'
 import { createPanelTransparency } from './transparency'
 import type { ReactElement, ReactNode } from 'react'
+import type { DiagnosticClient } from './diagnostics-client'
 import type { Settings } from './logic'
 
 let panelTransparency: ReturnType<typeof createPanelTransparency> | undefined
@@ -42,6 +45,7 @@ const RootBackgroundContext = createContext(false)
 type RootThemeProviderModule = {
 	RootThemeContextProvider?: (...args: unknown[]) => unknown
 }
+let diagnosticClient: DiagnosticClient | undefined
 let settings = DefaultSettings
 let saveSettings: ((value: Partial<Settings>) => Promise<unknown>) | undefined
 let rootBackgroundInserted = false
@@ -269,6 +273,7 @@ function BackgroundLayer() {
 		<View
 			ref={ref => {
 				backgroundHost = ref
+				diagnosticClient?.expose('bgHost', ref)
 				scheduleScreenPaint()
 			}}
 			pointerEvents="none"
@@ -362,6 +367,23 @@ export default plugin<{ jsonStorage: Settings }>({
 		chatSurfaceMarkerLogged = false
 		backgroundLayoutLogged = false
 		settings = normalizeSettings(await jsonStorage.get())
+		try {
+			if (
+				await FileModule.fileExists(
+					'/sdcard/Android/data/com.discord/files/.bgvideo-diagnostic',
+				)
+			) {
+				diagnosticClient = connectDiagnostics(revenge)
+				diagnosticClient.expose('getBgHost', () => backgroundHost)
+				diagnosticClient.expose('repaintBg', scheduleScreenPaint)
+				cleanup(() => {
+					diagnosticClient?.disconnect()
+					diagnosticClient = undefined
+				})
+			}
+		} catch (error) {
+			console.warn('[BgDiag] setup failed', String(error))
+		}
 		panelTransparency = createPanelTransparency(Tokens)
 		panelTransparency.setActive(panelTransparencyActive())
 		screenPainter = createScreenPainter(
